@@ -34,6 +34,26 @@ export interface FoodListItem {
   };
 }
 
+export interface FoodsSearchResult {
+  foods: Array<{
+    foodId: string;
+    dishName: string;
+    description: string;
+    price: number;
+    stock: number;
+    imageUrl: string;
+    restaurantId: string;
+    menu: { menuId: string; category: string };
+    enterprise: {
+      EnterpriseID: string;
+      EnterpriseName: string;
+    } | null;
+  }>;
+  total: number;
+  query: string;
+  cached: boolean;
+}
+
 @Injectable()
 export class FoodsService {
   constructor(private readonly prisma: PrismaService) {}
@@ -128,6 +148,78 @@ export class FoodsService {
 
   async findPopular(query: FoodsQueryDto) {
     return this.findMany(query);
+  }
+
+  /**
+   * Tìm kiếm món ăn theo từ khóa, dùng cho ô search trên app.
+   * Logic bám theo Next.js route /api/foods/search để giữ nguyên cấu trúc dữ liệu.
+   */
+  async searchFoods(query: string, limit: number): Promise<FoodsSearchResult> {
+    const trimmedQuery = query?.trim() ?? '';
+    const normalizedLimit = Math.min(Math.max(limit || 20, 1), 100);
+
+    if (!trimmedQuery) {
+      return {
+        foods: [],
+        total: 0,
+        query: '',
+        cached: false,
+      };
+    }
+
+    const foods = await this.prisma.food.findMany({
+      where: {
+        OR: [
+          { DishName: { contains: trimmedQuery } },
+          {
+            foodCategory: {
+              CategoryName: { contains: trimmedQuery },
+            },
+          },
+        ],
+        IsAvailable: true,
+      },
+      include: {
+        enterprise: {
+          select: {
+            EnterpriseName: true,
+            EnterpriseID: true,
+          },
+        },
+        foodCategory: {
+          select: {
+            CategoryName: true,
+          },
+        },
+      },
+      take: normalizedLimit,
+      orderBy: { DishName: 'asc' },
+    });
+
+    return {
+      foods: foods.map((food) => ({
+        foodId: food.FoodID,
+        dishName: food.DishName,
+        description: food.Description || '',
+        price: Number(food.Price),
+        stock: food.Stock || 0,
+        imageUrl: food.ImageURL || '/images/default-food.jpg',
+        restaurantId: food.EnterpriseID,
+        menu: {
+          menuId: food.FoodID,
+          category: food.foodCategory?.CategoryName || 'Food',
+        },
+        enterprise: food.enterprise
+          ? {
+              EnterpriseID: food.enterprise.EnterpriseID,
+              EnterpriseName: food.enterprise.EnterpriseName,
+            }
+          : null,
+      })),
+      total: foods.length,
+      query: trimmedQuery,
+      cached: false,
+    };
   }
 
   async findByIds(ids: string[]) {

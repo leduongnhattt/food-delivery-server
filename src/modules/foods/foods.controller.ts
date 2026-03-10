@@ -36,6 +36,18 @@ export class FoodsController {
     });
   }
 
+  @Get('search')
+  async search(
+    @Query('q') query?: string,
+    @Query('limit') limitStr?: string,
+  ) {
+    const limitParsed = limitStr != null ? parseInt(limitStr, 10) : NaN;
+    const limit = Number.isNaN(limitParsed)
+      ? 20
+      : Math.min(Math.max(limitParsed || 20, 1), 100);
+    return this.foodsService.searchFoods(query ?? '', limit);
+  }
+
   @Get('popular')
   async popular(
     @Query('limit') limitStr?: string,
