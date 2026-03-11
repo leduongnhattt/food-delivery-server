@@ -1,6 +1,12 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
-import { PrismaService } from '@infra/prisma/prisma.service';
+import {
+  FoodsRepository,
+  FoodListCriteria,
+  FoodsRepositoryLimits,
+} from '@infra/repositories/foods.repository';
+
+/** Default image path when food has no image. */
+const DEFAULT_FOOD_IMAGE = '/images/default-food.jpg';
 
 export interface FoodsQueryDto {
   limit?: number;
@@ -54,111 +60,84 @@ export interface FoodsSearchResult {
   cached: boolean;
 }
 
+export interface FoodByIdsItem {
+  id: string;
+  name: string;
+  price: number;
+  imageUrl: string;
+  restaurantId: string;
+  category: string;
+  description: string;
+  restaurantName: string;
+}
+
+export interface FoodsListResponse {
+  foods: FoodListItem[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+}
+
 @Injectable()
 export class FoodsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly foodsRepository: FoodsRepository) {}
 
-  async findMany(query: FoodsQueryDto) {
-    const limit = Math.min(Math.max(query.limit ?? 10, 1), 100);
-    const page = Math.max(query.page ?? 1, 1);
-    const skip = (page - 1) * limit;
+  async findMany(criteria: FoodsQueryDto): Promise<FoodsListResponse> {
+    const where = this.foodsRepository.buildWhereFromCriteria(
+      criteria as FoodListCriteria,
+    );
+    const { page, limit, skip } = this.foodsRepository.normalizePagination(
+      criteria.page,
+      criteria.limit,
+    );
 
-    const where: Prisma.FoodWhereInput = {
-      IsAvailable: query.isAvailable !== undefined ? query.isAvailable : true,
-    };
-    if (query.restaurantId) where.EnterpriseID = query.restaurantId;
-    if (query.category) {
-      where.foodCategory = { CategoryName: query.category };
-    }
-    if (query.search) {
-      where.OR = [
-        { DishName: { contains: query.search } },
-        { Description: { contains: query.search } },
-      ];
-    }
-    if (query.minPrice != null || query.maxPrice != null) {
-      where.Price = {};
-      if (query.minPrice != null) where.Price.gte = query.minPrice;
-      if (query.maxPrice != null) where.Price.lte = query.maxPrice;
-    }
-
-    const [foods, total] = await Promise.all([
-      this.prisma.food.findMany({
+    const [foodRows, totalCount] = await Promise.all([
+      this.foodsRepository.findManyWithCategoryAndEnterprise(
         where,
-        include: {
-          foodCategory: {
-            select: {
-              CategoryID: true,
-              CategoryName: true,
-            },
-          },
-          enterprise: {
-            select: {
-              EnterpriseID: true,
-              EnterpriseName: true,
-              Address: true,
-              PhoneNumber: true,
-              OpenHours: true,
-              CloseHours: true,
-              IsActive: true,
-            },
-          },
-        },
-        orderBy: [{ Stock: 'desc' }, { CreatedAt: 'desc' }],
+        [{ Stock: 'desc' }, { CreatedAt: 'desc' }],
         skip,
-        take: limit,
-      }),
-      this.prisma.food.count({ where }),
+        limit,
+      ),
+      this.foodsRepository.count(where),
     ]);
 
-    const transformedFoods: FoodListItem[] = foods.map((food) => ({
-      foodId: food.FoodID,
-      dishName: food.DishName,
-      price: Number(food.Price),
-      stock: food.Stock,
-      isAvailable: food.IsAvailable,
-      description: food.Description ?? '',
-      imageUrl: food.ImageURL ?? '',
-      restaurantId: food.enterprise.EnterpriseID,
-      menu: {
-        menuId: food.foodCategory.CategoryID,
-        category: food.foodCategory.CategoryName,
-      },
-      restaurant: {
-        id: food.enterprise.EnterpriseID,
-        name: food.enterprise.EnterpriseName,
-        address: food.enterprise.Address,
-        phone: food.enterprise.PhoneNumber,
-        openHours: food.enterprise.OpenHours,
-        closeHours: food.enterprise.CloseHours,
-        isActive: food.enterprise.IsActive,
-      },
-    }));
+    const foodListItems: FoodListItem[] = foodRows.map((row) =>
+      this.mapRowToFoodListItem(row),
+    );
 
     return {
-      foods: transformedFoods,
+      foods: foodListItems,
       pagination: {
         page,
         limit,
-        total,
-        totalPages: Math.ceil(total / limit),
+        total: totalCount,
+        totalPages: Math.ceil(totalCount / limit),
       },
     };
   }
 
-  async findPopular(query: FoodsQueryDto) {
-    return this.findMany(query);
+  async findPopular(criteria: FoodsQueryDto): Promise<FoodsListResponse> {
+    return this.findMany(criteria);
   }
 
   /**
    * Search foods by keyword (for app search box).
-   * Logic aligned with Next.js route /api/foods/search to keep response shape.
+   * Response shape aligned with Next.js /api/foods/search for compatibility.
    */
-  async searchFoods(query: string, limit: number): Promise<FoodsSearchResult> {
-    const trimmedQuery = query?.trim() ?? '';
-    const normalizedLimit = Math.min(Math.max(limit || 20, 1), 100);
+  async searchFoods(
+    searchQuery: string,
+    limitParam: number,
+  ): Promise<FoodsSearchResult> {
+    const trimmedKeyword = searchQuery?.trim() ?? '';
+    const take = Math.min(
+      Math.max(limitParam || FoodsRepositoryLimits.defaultSearchLimit, 1),
+      FoodsRepositoryLimits.maxPageSize,
+    );
 
-    if (!trimmedQuery) {
+    if (!trimmedKeyword) {
       return {
         foods: [],
         total: 0,
@@ -167,88 +146,100 @@ export class FoodsService {
       };
     }
 
-    const foods = await this.prisma.food.findMany({
-      where: {
-        OR: [
-          { DishName: { contains: trimmedQuery } },
-          {
-            foodCategory: {
-              CategoryName: { contains: trimmedQuery },
-            },
-          },
-        ],
-        IsAvailable: true,
+    const rows = await this.foodsRepository.searchAvailableByKeyword(
+      trimmedKeyword,
+      take,
+    );
+
+    const searchItems = rows.map((row) => ({
+      foodId: row.FoodID,
+      dishName: row.DishName,
+      description: row.Description ?? '',
+      price: Number(row.Price),
+      stock: row.Stock ?? 0,
+      imageUrl: row.ImageURL ?? DEFAULT_FOOD_IMAGE,
+      restaurantId: row.EnterpriseID,
+      menu: {
+        menuId: row.FoodID,
+        category: row.foodCategory?.CategoryName ?? 'Food',
       },
-      include: {
-        enterprise: {
-          select: {
-            EnterpriseName: true,
-            EnterpriseID: true,
-          },
-        },
-        foodCategory: {
-          select: {
-            CategoryName: true,
-          },
-        },
-      },
-      take: normalizedLimit,
-      orderBy: { DishName: 'asc' },
-    });
+      enterprise: row.enterprise
+        ? {
+            EnterpriseID: row.enterprise.EnterpriseID,
+            EnterpriseName: row.enterprise.EnterpriseName,
+          }
+        : null,
+    }));
 
     return {
-      foods: foods.map((food) => ({
-        foodId: food.FoodID,
-        dishName: food.DishName,
-        description: food.Description || '',
-        price: Number(food.Price),
-        stock: food.Stock || 0,
-        imageUrl: food.ImageURL || '/images/default-food.jpg',
-        restaurantId: food.EnterpriseID,
-        menu: {
-          menuId: food.FoodID,
-          category: food.foodCategory?.CategoryName || 'Food',
-        },
-        enterprise: food.enterprise
-          ? {
-              EnterpriseID: food.enterprise.EnterpriseID,
-              EnterpriseName: food.enterprise.EnterpriseName,
-            }
-          : null,
-      })),
-      total: foods.length,
-      query: trimmedQuery,
+      foods: searchItems,
+      total: rows.length,
+      query: trimmedKeyword,
       cached: false,
     };
   }
 
-  async findByIds(ids: string[]) {
-    if (!ids?.length) return { foods: [] };
-    const foods = await this.prisma.food.findMany({
-      where: { FoodID: { in: ids } },
-      select: {
-        FoodID: true,
-        DishName: true,
-        Price: true,
-        Description: true,
-        ImageURL: true,
-        EnterpriseID: true,
-        foodCategory: { select: { CategoryName: true } },
-        enterprise: { select: { EnterpriseName: true } },
-      },
-    });
+  async findByIds(ids: string[]): Promise<{ foods: FoodByIdsItem[] }> {
+    const rows =
+      await this.foodsRepository.findByIdsWithCategoryAndEnterprise(
+        Array.isArray(ids) ? ids : [],
+      );
+
+    const items: FoodByIdsItem[] = rows.map((row) => ({
+      id: row.FoodID,
+      name: row.DishName,
+      price: Number(row.Price),
+      imageUrl: row.ImageURL ?? DEFAULT_FOOD_IMAGE,
+      restaurantId: row.EnterpriseID,
+      category: row.foodCategory?.CategoryName ?? '',
+      description: row.Description ?? '',
+      restaurantName: row.enterprise?.EnterpriseName ?? '',
+    }));
+
+    return { foods: items };
+  }
+
+  private mapRowToFoodListItem(row: {
+    FoodID: string;
+    DishName: string;
+    Price: unknown;
+    Stock: number;
+    IsAvailable: boolean;
+    Description: string | null;
+    ImageURL: string | null;
+    foodCategory: { CategoryID: string; CategoryName: string };
+    enterprise: {
+      EnterpriseID: string;
+      EnterpriseName: string;
+      Address: string;
+      PhoneNumber: string;
+      OpenHours: string;
+      CloseHours: string;
+      IsActive: boolean;
+    };
+  }): FoodListItem {
     return {
-      foods: foods.map((food) => ({
-        id: food.FoodID,
-        name: food.DishName,
-        price: Number(food.Price),
-        imageUrl: food.ImageURL ?? '',
-        restaurantId: food.EnterpriseID,
-        category: food.foodCategory?.CategoryName ?? '',
-        description: food.Description ?? '',
-        restaurantName: food.enterprise?.EnterpriseName ?? '',
-      })),
+      foodId: row.FoodID,
+      dishName: row.DishName,
+      price: Number(row.Price),
+      stock: row.Stock,
+      isAvailable: row.IsAvailable,
+      description: row.Description ?? '',
+      imageUrl: row.ImageURL ?? DEFAULT_FOOD_IMAGE,
+      restaurantId: row.enterprise.EnterpriseID,
+      menu: {
+        menuId: row.foodCategory.CategoryID,
+        category: row.foodCategory.CategoryName,
+      },
+      restaurant: {
+        id: row.enterprise.EnterpriseID,
+        name: row.enterprise.EnterpriseName,
+        address: row.enterprise.Address,
+        phone: row.enterprise.PhoneNumber,
+        openHours: row.enterprise.OpenHours,
+        closeHours: row.enterprise.CloseHours,
+        isActive: row.enterprise.IsActive,
+      },
     };
   }
 }
-
