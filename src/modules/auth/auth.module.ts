@@ -9,7 +9,7 @@ import { AuthRepository } from '@infra/repositories/auth.repository';
   imports: [PrismaModule],
   providers: [AuthService, AuthEmailService, AuthRepository],
   controllers: [AuthController],
-  exports: [AuthService],
+  exports: [AuthService, AuthRepository],
 })
 export class AuthModule {}
 
