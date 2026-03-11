@@ -151,8 +151,8 @@ export class FoodsService {
   }
 
   /**
-   * Tìm kiếm món ăn theo từ khóa, dùng cho ô search trên app.
-   * Logic bám theo Next.js route /api/foods/search để giữ nguyên cấu trúc dữ liệu.
+   * Search foods by keyword (for app search box).
+   * Logic aligned with Next.js route /api/foods/search to keep response shape.
    */
   async searchFoods(query: string, limit: number): Promise<FoodsSearchResult> {
     const trimmedQuery = query?.trim() ?? '';
