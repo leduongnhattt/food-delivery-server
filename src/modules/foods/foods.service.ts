@@ -4,6 +4,7 @@ import {
   FoodListCriteria,
   FoodsRepositoryLimits,
 } from '@infra/repositories/foods.repository';
+import { getKeyJson, setKeyJson } from '@infra/redis/redis.service';
 
 /** Default image path when food has no image. */
 const DEFAULT_FOOD_IMAGE = '/images/default-food.jpg';
@@ -146,6 +147,12 @@ export class FoodsService {
       };
     }
 
+    const cacheKey = `food_search:${trimmedKeyword.toLowerCase()}:${take}`;
+    const cached = await getKeyJson<FoodsSearchResult>(cacheKey);
+    if (cached) {
+      return { ...cached, cached: true };
+    }
+
     const rows = await this.foodsRepository.searchAvailableByKeyword(
       trimmedKeyword,
       take,
@@ -171,12 +178,19 @@ export class FoodsService {
         : null,
     }));
 
-    return {
+    const result: FoodsSearchResult = {
       foods: searchItems,
       total: rows.length,
       query: trimmedKeyword,
       cached: false,
     };
+    // Best-effort cache; ignore errors.
+    try {
+      await setKeyJson(cacheKey, result, 300);
+    } catch {
+      // no-op
+    }
+    return result;
   }
 
   async findByIds(ids: string[]): Promise<{ foods: FoodByIdsItem[] }> {
