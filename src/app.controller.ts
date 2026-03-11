@@ -25,7 +25,7 @@ export class AppController {
   }
 
   /**
-   * Kiểm tra kết nối DB: gọi GET /api/db-check để xem có kết nối được MySQL không.
+   * Check DB connection: GET /api/db-check to verify MySQL connectivity.
    */
   @Get('db-check')
   async dbCheck(): Promise<{
@@ -40,22 +40,21 @@ export class AppController {
       const dbVersion = version?.[0]?.VERSION ?? 'unknown';
       return {
         success: true,
-        message: 'Kết nối database thành công.',
+        message: 'Database connection successful.',
         db: dbVersion,
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return {
         success: false,
-        message: 'Không kết nối được database.',
+        message: 'Database connection failed.',
         error: message,
       };
     }
   }
 
   /**
-   * Lấy danh sách toàn bộ bảng trong database hiện tại.
-   * GET /api/db-check/tables
+   * List all tables in the current database. GET /api/db-check/tables
    */
   @Get('db-check/tables')
   async dbCheckTables(): Promise<{
