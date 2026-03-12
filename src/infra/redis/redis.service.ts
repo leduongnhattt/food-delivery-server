@@ -47,3 +47,29 @@ export async function deleteKey(key: string): Promise<void> {
   await redisClient.del(key);
 }
 
+export async function expireKey(
+  key: string,
+  ttlSeconds: number,
+): Promise<void> {
+  if (!redisClient) return;
+  if (ttlSeconds > 0) {
+    await redisClient.expire(key, ttlSeconds);
+  }
+}
+
+export async function getAllHashJson<T>(
+  hashKey: string,
+): Promise<Record<string, T>> {
+  if (!redisClient) return {};
+  const entries = await redisClient.hgetall(hashKey);
+  const result: Record<string, T> = {};
+  for (const [k, v] of Object.entries(entries)) {
+    try {
+      result[k] = JSON.parse(v) as T;
+    } catch {
+      // skip malformed
+    }
+  }
+  return result;
+}
+
