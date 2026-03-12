@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { AuthRepository } from '@infra/repositories/auth.repository';
 import * as bcrypt from 'bcryptjs';
-import * as jwt from 'jsonwebtoken';
+import type { Secret, SignOptions } from 'jsonwebtoken';
+import { sign as jwtSign, verify as jwtVerify } from 'jsonwebtoken';
 import { createHash, randomBytes } from 'crypto';
 import { OAuth2Client } from 'google-auth-library';
 import { AuthEmailService } from '@modules/auth/auth-email.service';
@@ -14,6 +15,18 @@ export type JwtPayload = {
   status?: string;
   provider?: string;
 };
+
+type JwtSignFn = (
+  payload: string | Buffer | object,
+  secretOrPrivateKey: Secret,
+  options?: SignOptions,
+) => string;
+
+const safeJwtSign: JwtSignFn = jwtSign as unknown as JwtSignFn;
+
+type JwtVerifyFn = (token: string, secretOrPublicKey: Secret) => unknown;
+
+const safeJwtVerify: JwtVerifyFn = jwtVerify as unknown as JwtVerifyFn;
 
 export interface GoogleUserInfo {
   email: string;
@@ -59,7 +72,7 @@ export class AuthService {
 
   // Account / customer management
 
-  async findAccountByUsername(username: string): Promise<any | null> {
+  async findAccountByUsername(username: string) {
     return this.authRepo.findAccountByUsername(username);
   }
 
@@ -123,8 +136,8 @@ export class AuthService {
   }
 
   private signAccessToken(payload: JwtPayload): string {
-    return jwt.sign(payload, this.jwtSecret, {
-      expiresIn: this.accessTokenTtl as any,
+    return safeJwtSign(payload, this.jwtSecret, {
+      expiresIn: this.accessTokenTtl,
     });
   }
 
@@ -146,10 +159,10 @@ export class AuthService {
     });
     const accessToken = this.signAccessToken({
       accountId,
-      role: (account as any)?.role?.RoleName || role,
-      username: (account as any)?.Username,
-      email: (account as any)?.Email,
-      status: (account as any)?.Status,
+      role: account?.role?.RoleName || role,
+      username: account?.Username ?? undefined,
+      email: account?.Email ?? undefined,
+      status: account?.Status ?? undefined,
       provider,
     });
     const rawRefreshToken = this.cryptoRandom();
@@ -181,10 +194,10 @@ export class AuthService {
     if (!account) return null;
     const newAccessToken = this.signAccessToken({
       accountId,
-      role: (account as any).role?.RoleName || 'customer',
-      username: (account as any).Username,
-      email: (account as any).Email,
-      status: (account as any).Status,
+      role: account.role?.RoleName || 'customer',
+      username: account.Username ?? undefined,
+      email: account.Email ?? undefined,
+      status: account.Status ?? undefined,
     });
     await this.authRepo.updateAuthTokenAccessToken(
       accountId,
@@ -236,7 +249,9 @@ export class AuthService {
     return true;
   }
 
-  async forgotPassword(email: string): Promise<{ success: boolean; error?: string }> {
+  async forgotPassword(
+    email: string,
+  ): Promise<{ success: boolean; error?: string }> {
     if (!email || typeof email !== 'string') {
       return { success: false, error: 'Email is required' };
     }
@@ -247,12 +262,14 @@ export class AuthService {
       };
     }
     const account = await this.authRepo.findActiveCustomerByEmail(email);
-    if (!account || (account as any).role?.RoleName !== 'Customer') {
+    if (!account || account.role?.RoleName !== 'Customer') {
       return { success: true };
     }
     const resetCode = this.generateResetCode();
     const expiresAt = new Date(Date.now() + 60 * 1000);
-    await this.authRepo.invalidatePasswordResetTokensForAccount(account.AccountID);
+    await this.authRepo.invalidatePasswordResetTokensForAccount(
+      account.AccountID,
+    );
     await this.authRepo.createPasswordResetToken({
       AccountID: account.AccountID,
       ResetCode: resetCode,
@@ -264,7 +281,10 @@ export class AuthService {
       account.Username,
     );
     if (!sent) {
-      return { success: false, error: 'Failed to send reset code. Please try again.' };
+      return {
+        success: false,
+        error: 'Failed to send reset code. Please try again.',
+      };
     }
     return { success: true };
   }
@@ -276,11 +296,15 @@ export class AuthService {
     if (!email || !code) {
       return { success: false, error: 'Email and reset code are required' };
     }
-    if (typeof code !== 'string' || code.length !== 6 || !/^\d{6}$/.test(code)) {
+    if (
+      typeof code !== 'string' ||
+      code.length !== 6 ||
+      !/^\d{6}$/.test(code)
+    ) {
       return { success: false, error: 'Invalid reset code format' };
     }
     const account = await this.authRepo.findActiveCustomerByEmail(email);
-    if (!account || (account as any).role?.RoleName !== 'Customer') {
+    if (!account || account.role?.RoleName !== 'Customer') {
       return { success: false, error: 'Invalid email or reset code' };
     }
     const resetToken = await this.authRepo.findValidResetTokenByAccountAndCode(
@@ -293,7 +317,9 @@ export class AuthService {
     return { success: true, tokenId: resetToken.TokenID };
   }
 
-  async resendResetCode(email: string): Promise<{ success: boolean; error?: string }> {
+  async resendResetCode(
+    email: string,
+  ): Promise<{ success: boolean; error?: string }> {
     if (!email || typeof email !== 'string') {
       return { success: false, error: 'Email is required' };
     }
@@ -304,12 +330,14 @@ export class AuthService {
       };
     }
     const account = await this.authRepo.findActiveCustomerByEmail(email);
-    if (!account || (account as any).role?.RoleName !== 'Customer') {
+    if (!account || account.role?.RoleName !== 'Customer') {
       return { success: false, error: 'Account not found' };
     }
     const resetCode = this.generateResetCode();
     const expiresAt = new Date(Date.now() + 60 * 1000);
-    await this.authRepo.invalidatePasswordResetTokensForAccount(account.AccountID);
+    await this.authRepo.invalidatePasswordResetTokensForAccount(
+      account.AccountID,
+    );
     await this.authRepo.createPasswordResetToken({
       AccountID: account.AccountID,
       ResetCode: resetCode,
@@ -321,7 +349,10 @@ export class AuthService {
       account.Username,
     );
     if (!sent) {
-      return { success: false, error: 'Failed to send reset code. Please try again.' };
+      return {
+        success: false,
+        error: 'Failed to send reset code. Please try again.',
+      };
     }
     return { success: true };
   }
@@ -331,25 +362,27 @@ export class AuthService {
     newPassword: string,
   ): Promise<{ success: boolean; error?: string }> {
     if (!tokenId || !newPassword) {
-      return { success: false, error: 'Token ID and new password are required' };
+      return {
+        success: false,
+        error: 'Token ID and new password are required',
+      };
     }
     if (typeof newPassword !== 'string' || newPassword.length < 6) {
-      return { success: false, error: 'Password must be at least 6 characters long' };
+      return {
+        success: false,
+        error: 'Password must be at least 6 characters long',
+      };
     }
     const resetToken = await this.authRepo.findValidResetTokenById(tokenId);
-    if (!resetToken || (resetToken.account as any).role?.RoleName !== 'Customer') {
+    if (!resetToken || resetToken.account.role?.RoleName !== 'Customer') {
       return { success: false, error: 'Invalid or expired reset token' };
     }
     const hashed = await this.hashPassword(newPassword);
-    await this.authRepo.resetPasswordTx(
-      tokenId,
-      resetToken.AccountID,
-      hashed,
-    );
+    await this.authRepo.resetPasswordTx(tokenId, resetToken.AccountID, hashed);
     try {
       await this.authEmail.sendPasswordResetSuccess(
-        (resetToken.account as any).Email,
-        (resetToken.account as any).Username,
+        resetToken.account.Email,
+        resetToken.account.Username,
       );
     } catch {
       // ignore
@@ -363,10 +396,16 @@ export class AuthService {
     newPassword: string,
   ): Promise<{ success: boolean; error?: string }> {
     if (!currentPassword || !newPassword) {
-      return { success: false, error: 'Current password and new password are required' };
+      return {
+        success: false,
+        error: 'Current password and new password are required',
+      };
     }
     if (newPassword.length < 6) {
-      return { success: false, error: 'New password must be at least 6 characters long' };
+      return {
+        success: false,
+        error: 'New password must be at least 6 characters long',
+      };
     }
     if (currentPassword === newPassword) {
       return {
@@ -378,7 +417,7 @@ export class AuthService {
     if (!account) {
       return { success: false, error: 'User account not found' };
     }
-    const hash = (account as any).PasswordHash;
+    const hash = account.PasswordHash;
     if (!hash) {
       return { success: false, error: 'User account has no password set' };
     }
@@ -454,9 +493,12 @@ export class AuthService {
           address: 'Default Address',
           preferredPaymentMethod: 'Cash',
         });
-      } catch (e: any) {
-        const msg = typeof e?.message === 'string' ? e.message : '';
-        if (msg.includes('CUSTOMER_PhoneNumber') || msg.includes('PhoneNumber')) {
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : '';
+        if (
+          msg.includes('CUSTOMER_PhoneNumber') ||
+          msg.includes('PhoneNumber')
+        ) {
           await this.createCustomer({
             accountId,
             fullName: googleUser.name,
@@ -478,7 +520,9 @@ export class AuthService {
     const username = this.generateUsernameFromEmail(googleUser.email);
     const existing = await this.authRepo.findAccountByUsernameRaw(username);
     if (existing) {
-      throw new Error(`Username '${username}' already exists. Please contact support.`);
+      throw new Error(
+        `Username '${username}' already exists. Please contact support.`,
+      );
     }
     const newAccount = await this.authRepo.createAccount({
       Username: username,
@@ -501,8 +545,8 @@ export class AuthService {
         Address: 'Default Address',
         PreferredPaymentMethod: 'Cash',
       });
-    } catch (e: any) {
-      const msg = typeof e?.message === 'string' ? e.message : '';
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : '';
       if (msg.includes('CUSTOMER_PhoneNumber') || msg.includes('PhoneNumber')) {
         await this.authRepo.createCustomer({
           AccountID: newAccount.AccountID,
@@ -536,7 +580,8 @@ export class AuthService {
 
   verifyAccessToken(token: string): JwtPayload | null {
     try {
-      return jwt.verify(token, this.jwtSecret) as JwtPayload;
+      const decoded = safeJwtVerify(token, this.jwtSecret);
+      return decoded as JwtPayload;
     } catch {
       return null;
     }
@@ -551,9 +596,11 @@ export class AuthService {
   }
 
   /** Returns accountId from refresh token (for refresh or logout). */
-  async getAccountIdFromRefreshToken(refreshToken: string): Promise<string | null> {
-    const token = await this.authRepo.findValidAuthTokenByRefreshToken(refreshToken);
+  async getAccountIdFromRefreshToken(
+    refreshToken: string,
+  ): Promise<string | null> {
+    const token =
+      await this.authRepo.findValidAuthTokenByRefreshToken(refreshToken);
     return token?.AccountID ?? null;
   }
 }
-

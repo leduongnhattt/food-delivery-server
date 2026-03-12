@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma, AccountStatus, Gender, PaymentMethod } from '@prisma/client';
 import { PrismaService } from '@infra/prisma/prisma.service';
 
 /**
@@ -74,11 +75,11 @@ export class AuthRepository {
     PasswordHash: string;
     RoleID: string;
     Avatar?: string;
-    Status?: string;
-    Provider?: string;
-    ProviderAccountId?: string;
+    Status?: AccountStatus;
+    Provider?: string | null;
+    ProviderAccountId?: string | null;
     EmailVerified?: boolean;
-    LastLogin?: Date;
+    LastLogin?: Date | null;
   }) {
     return this.prisma.account.create({
       data: {
@@ -87,7 +88,7 @@ export class AuthRepository {
         PasswordHash: data.PasswordHash,
         RoleID: data.RoleID,
         Avatar: data.Avatar ?? '',
-        Status: (data.Status as any) ?? 'Active',
+        Status: data.Status ?? AccountStatus.Active,
         Provider: data.Provider ?? null,
         ProviderAccountId: data.ProviderAccountId ?? null,
         EmailVerified: data.EmailVerified ?? false,
@@ -103,10 +104,13 @@ export class AuthRepository {
     });
   }
 
-  updateAccount(accountId: string, data: Record<string, unknown>) {
+  updateAccount(
+    accountId: string,
+    data: Prisma.AccountUpdateInput | Prisma.AccountUncheckedUpdateInput,
+  ) {
     return this.prisma.account.update({
       where: { AccountID: accountId },
-      data: data as any,
+      data,
       include: { role: true },
     });
   }
@@ -140,8 +144,8 @@ export class AuthRepository {
     PhoneNumber: string;
     Address: string;
     DateOfBirth?: Date | null;
-    Gender?: string | null;
-    PreferredPaymentMethod?: string;
+    Gender?: Gender | null;
+    PreferredPaymentMethod?: PaymentMethod;
   }) {
     return this.prisma.customer.create({
       data: {
@@ -150,8 +154,8 @@ export class AuthRepository {
         PhoneNumber: data.PhoneNumber,
         Address: data.Address,
         DateOfBirth: data.DateOfBirth ?? null,
-        Gender: data.Gender as any ?? null,
-        PreferredPaymentMethod: (data.PreferredPaymentMethod as any) ?? 'Cash',
+        Gender: data.Gender ?? null,
+        PreferredPaymentMethod: data.PreferredPaymentMethod ?? PaymentMethod.Cash,
       },
       select: {
         CustomerID: true,

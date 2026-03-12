@@ -15,6 +15,26 @@ import type { Request } from 'express';
 import { RestaurantsService } from '@modules/restaurants/restaurants.service';
 import { AuthService } from '@modules/auth/auth.service';
 
+interface CreateRestaurantBody {
+  name?: string;
+  description?: string;
+  address?: string;
+  phone?: string;
+  openHours?: string;
+  closeHours?: string;
+  isActive?: boolean;
+}
+
+interface UpdateRestaurantBody {
+  name?: string;
+  description?: string;
+  address?: string;
+  phone?: string;
+  openHours?: string;
+  closeHours?: string;
+  isOpen?: boolean;
+}
+
 @Controller('restaurants')
 export class RestaurantsController {
   constructor(
@@ -78,7 +98,7 @@ export class RestaurantsController {
   }
 
   @Post()
-  async create(@Req() req: Request, @Body() body: any) {
+  async create(@Req() req: Request, @Body() body: CreateRestaurantBody) {
     const authHeader = req.headers['authorization'];
     const token = authHeader?.replace(/^Bearer\s+/i, '');
     if (!token) {
@@ -97,7 +117,7 @@ export class RestaurantsController {
       openHours,
       closeHours,
       isActive,
-    } = body ?? {};
+    } = body;
 
     if (!name || !description || !address || !phone) {
       throw new BadRequestException(
@@ -121,7 +141,10 @@ export class RestaurantsController {
   }
 
   @Put(':id')
-  async update(@Param('id') id: string, @Body() body: any) {
+  async update(
+    @Param('id') id: string,
+    @Body() body: UpdateRestaurantBody,
+  ) {
     const {
       name,
       description,
@@ -130,7 +153,7 @@ export class RestaurantsController {
       openHours,
       closeHours,
       isOpen,
-    } = body ?? {};
+    } = body;
     return this.restaurantsService.update(id, {
       name,
       description,

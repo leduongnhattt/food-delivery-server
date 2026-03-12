@@ -1,10 +1,11 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from '@src/app.module';
+import { config as loadEnv } from 'dotenv';
 import { resolve } from 'path';
 
 async function bootstrap() {
   // Load .env from project root (works when running from any cwd or from dist/)
-  require('dotenv').config({
+  loadEnv({
     path: resolve(__dirname, '..', '.env'),
   });
   const app = await NestFactory.create(AppModule);
@@ -26,4 +27,5 @@ async function bootstrap() {
   await app.listen(port);
   console.log(`NestJS API: http://localhost:${port}/api`);
 }
-bootstrap();
+
+void bootstrap();

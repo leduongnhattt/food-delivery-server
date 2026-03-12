@@ -10,14 +10,30 @@ import {
   Res,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import * as jwt from 'jsonwebtoken';
+import { verify as jwtVerify } from 'jsonwebtoken';
 import { CartService } from '@modules/cart/cart.service';
 import { ONE_DAY_SECONDS } from '@infra/cart/cart-keys';
 import { PrismaService } from '@infra/prisma/prisma.service';
 
 type Actor = { userId?: string; guestToken?: string };
 
-function parseCookies(cookieHeader: string | undefined): Record<string, string> {
+type AddItemBody = {
+  foodId?: string;
+  quantity?: number | string;
+  note?: string;
+};
+
+type UpdateItemBody = {
+  quantity?: number | string;
+};
+
+type JwtVerifyFn = (token: string, secretOrPublicKey: string) => unknown;
+
+const safeJwtVerify: JwtVerifyFn = jwtVerify as unknown as JwtVerifyFn;
+
+function parseCookies(
+  cookieHeader: string | undefined,
+): Record<string, string> {
   const cookies: Record<string, string> = {};
   if (!cookieHeader) return cookies;
   const parts = cookieHeader.split(';');
@@ -34,12 +50,12 @@ function parseCookies(cookieHeader: string | undefined): Record<string, string> 
 
 function getActorFromRequest(req: Request): Actor {
   let userId = (req.headers['x-user-id'] as string) || undefined;
-  const authHeader = req.headers['authorization'] as string | undefined;
+  const authHeader = req.headers['authorization'];
 
   if (!userId && authHeader && authHeader.startsWith('Bearer ')) {
     const bearer = authHeader.replace('Bearer ', '');
     try {
-      const decoded = jwt.verify(
+      const decoded = safeJwtVerify(
         bearer,
         process.env.JWT_SECRET || 'change-me',
       ) as { accountId?: string; role?: string };
@@ -95,7 +111,6 @@ export class CartController {
       const snap = await this.cartService.snapshotCart(cartId);
       return res.status(200).json(snap);
     } catch (e) {
-      // eslint-disable-next-line no-console
       console.error('GET /cart failed', e);
       return res.status(500).json({ error: 'Failed to get cart' });
     }
@@ -112,19 +127,22 @@ export class CartController {
       await this.cartService.abandonCart(cartId);
       return res.status(204).send();
     } catch (e) {
-      // eslint-disable-next-line no-console
       console.error('DELETE /cart failed', e);
       return res.status(500).json({ error: 'Failed to clear cart' });
     }
   }
 
   @Post('items')
-  async addItem(@Req() req: Request, @Res() res: Response, @Body() body: any) {
+  async addItem(
+    @Req() req: Request,
+    @Res() res: Response,
+    @Body() body: AddItemBody,
+  ) {
     try {
       const actor = getActorFromRequest(req);
-      const foodId: string = body?.foodId;
-      const qty: number = Number(body?.quantity || 1);
-      const note: string | undefined = body?.note;
+      const foodId = body.foodId ?? '';
+      const qty = Number(body.quantity ?? 1);
+      const note = body.note;
       if (!foodId || qty <= 0) {
         return res.status(400).json({ error: 'Invalid payload' });
       }
@@ -157,7 +175,6 @@ export class CartController {
       const snap = await this.cartService.snapshotCart(cartId);
       return res.status(200).json(snap);
     } catch (e) {
-      // eslint-disable-next-line no-console
       console.error('POST /cart/items failed', e);
       return res.status(500).json({ error: 'Failed to add item' });
     }
@@ -168,11 +185,11 @@ export class CartController {
     @Req() req: Request,
     @Res() res: Response,
     @Param('foodId') foodId: string,
-    @Body() body: any,
+    @Body() body: UpdateItemBody,
   ) {
     try {
       const actor = getActorFromRequest(req);
-      const qty: number = Number(body?.quantity);
+      const qty = Number(body.quantity);
       if (!foodId || Number.isNaN(qty)) {
         return res.status(400).json({ error: 'Invalid payload' });
       }
@@ -191,10 +208,8 @@ export class CartController {
       const snap = await this.cartService.snapshotCart(cartId);
       return res.status(200).json(snap);
     } catch (e) {
-      // eslint-disable-next-line no-console
       console.error('PATCH /cart/items/:foodId failed', e);
       return res.status(500).json({ error: 'Failed to update item' });
     }
   }
 }
-

@@ -16,7 +16,22 @@ import type { Request } from 'express';
 import { AuthService } from '@modules/auth/auth.service';
 import { ReviewsService } from '@modules/reviews/reviews.service';
 
-function getAccountIdFromRequest(req: Request, authService: AuthService): string | null {
+type UploadedImageFile = {
+  buffer?: Buffer;
+  mimetype?: string;
+  size?: number;
+};
+
+interface RequestWithFiles extends Request {
+  files?: {
+    images?: UploadedImageFile[];
+  };
+}
+
+function getAccountIdFromRequest(
+  req: Request,
+  authService: AuthService,
+): string | null {
   const authHeader = req.headers['authorization'];
   const token = authHeader?.replace(/^Bearer\s+/i, '');
   if (!token) return null;
@@ -44,11 +59,8 @@ export class ReviewsController {
     @Body() body: { enterpriseId?: string; rating?: string; comment?: string },
   ) {
     const accountId = requireAccountId(req, this.authService);
-    const files = (req as any).files?.images as Array<{
-      buffer?: Buffer;
-      mimetype?: string;
-      size?: number;
-    }> | undefined;
+    const { files: requestFiles } = req as RequestWithFiles;
+    const files = requestFiles?.images;
     const imageBuffers = Array.isArray(files)
       ? files
           .filter((f) => f?.buffer && (f.size ?? 0) > 0)
@@ -107,9 +119,15 @@ export class ReviewsController {
   ) {
     const accountId = requireAccountId(req, this.authService);
     if (typeof body.isHidden !== 'boolean') {
-      throw new BadRequestException('Invalid payload: isHidden must be a boolean');
+      throw new BadRequestException(
+        'Invalid payload: isHidden must be a boolean',
+      );
     }
-    return this.reviewsService.patchEnterpriseReview(accountId, id, body.isHidden);
+    return this.reviewsService.patchEnterpriseReview(
+      accountId,
+      id,
+      body.isHidden,
+    );
   }
 
   @Get('admin/reviews')

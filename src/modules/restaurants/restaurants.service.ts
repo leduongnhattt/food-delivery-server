@@ -119,14 +119,6 @@ export class RestaurantsService {
       throw new NotFoundException('Restaurant not found');
     }
 
-    const ratings = row.reviews
-      .map((r) => r.Rating)
-      .filter((r): r is number => r != null);
-    const averageRating =
-      ratings.length > 0
-        ? ratings.reduce((a, b) => a + b, 0) / ratings.length
-        : 0;
-
     const foods = row.foods.map((f) => ({
       foodId: f.FoodID,
       dishName: f.DishName,

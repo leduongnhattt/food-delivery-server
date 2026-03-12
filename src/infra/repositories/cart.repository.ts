@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '@infra/prisma/prisma.service';
 import {
   cartByIdKey,
@@ -171,7 +172,7 @@ export class CartRepository {
     actor: CartActor,
     enterpriseId: string,
   ): Promise<string> {
-    const data: any = {
+    const data: Prisma.CartUncheckedCreateInput = {
       EnterpriseID: enterpriseId,
       Status: 'Active',
     };
@@ -180,7 +181,9 @@ export class CartRepository {
         where: { AccountID: actor.userId },
         select: { CustomerID: true },
       });
-      if (customer) data.CustomerID = customer.CustomerID;
+      if (customer) {
+        data.CustomerID = customer.CustomerID;
+      }
     }
     if (actor.guestToken) {
       const existingByToken = await this.prisma.cart.findFirst({

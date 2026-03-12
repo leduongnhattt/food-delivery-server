@@ -17,6 +17,48 @@ import {
   type GoogleCallbackMessage,
 } from '@infra/templates/oauth.templates';
 
+interface RegisterBody {
+  username?: string;
+  email?: string;
+  password?: string;
+  confirmPassword?: string;
+}
+
+interface LoginBody {
+  username?: string;
+  password?: string;
+}
+
+interface BasicAccount {
+  AccountID: string;
+  Username: string;
+  Email: string;
+  Status: string;
+  PasswordHash?: string | null;
+  role?: { RoleName: string } | null;
+  customer?: unknown;
+}
+
+interface ProfileAccount {
+  AccountID: string;
+  Email: string;
+  Username: string;
+  Avatar: string | null;
+  Status: string;
+  CreatedAt: Date;
+  UpdatedAt: Date;
+  role?: { RoleName: string } | null;
+  customer?: unknown;
+}
+
+interface GoogleAccount {
+  AccountID: string;
+  Username: string;
+  Email: string;
+  Status: string;
+  role?: { RoleName: string } | null;
+}
+
 function parseCookies(cookieHeader: string | undefined): Record<string, string> {
   const cookies: Record<string, string> = {};
   if (!cookieHeader) return cookies;
@@ -40,7 +82,7 @@ export class AuthController {
   ) {}
 
   @Post('register')
-  async register(@Body() body: any, @Res() res: Response) {
+  async register(@Body() body: RegisterBody, @Res() res: Response) {
     try {
       const { username, email, password, confirmPassword } = body ?? {};
 
@@ -85,7 +127,9 @@ export class AuthController {
         });
       }
 
-      const existingUsername = await this.authService.findAccountByUsername(username);
+      const existingUsername = (await this.authService.findAccountByUsername(
+        username,
+      )) as BasicAccount | null;
       if (existingUsername) {
         return res.status(400).json({
           error: 'signup.errors.usernameExists',
@@ -102,11 +146,11 @@ export class AuthController {
       }
 
       const passwordHash = await this.authService.hashPassword(password);
-      const account = await this.authService.createAccount({
+      const account = (await this.authService.createAccount({
         username,
         email,
         passwordHash,
-      });
+      })) as BasicAccount;
 
       return res.status(201).json({
         success: true,
@@ -134,7 +178,7 @@ export class AuthController {
   }
 
   @Post('login')
-  async login(@Body() body: any, @Res() res: Response) {
+  async login(@Body() body: LoginBody, @Res() res: Response) {
     try {
       const { username, password } = body ?? {};
 
@@ -144,7 +188,9 @@ export class AuthController {
         });
       }
 
-      const account = await this.authService.findAccountByUsername(username);
+      const account = (await this.authService.findAccountByUsername(
+        username,
+      )) as BasicAccount | null;
       if (!account) {
         return res.status(401).json({
           error:
@@ -152,9 +198,10 @@ export class AuthController {
         });
       }
 
+      const passwordHash = account.PasswordHash ?? '';
       const isPasswordValid = await this.authService.verifyPassword(
         password,
-        account.PasswordHash,
+        passwordHash,
       );
       if (!isPasswordValid) {
         return res.status(401).json({
@@ -163,11 +210,13 @@ export class AuthController {
         });
       }
 
-      const roleRecord = await this.authRepo.findAccountById(account.AccountID, {
-        withRole: true,
-      });
-      const roleName =
-        (roleRecord as any)?.role?.RoleName || (account as any)?.role?.RoleName || 'Customer';
+      const roleRecord = await this.authRepo.findAccountById(
+        account.AccountID,
+        {
+          withRole: true,
+        },
+      );
+      const roleName = roleRecord?.role?.RoleName ?? 'Customer';
 
       const roleLower = (roleName || '').toLowerCase();
       if (
@@ -295,12 +344,13 @@ export class AuthController {
         return res.status(401).json({ error: 'Invalid or expired token' });
       }
 
-      const account = await this.authService.getProfile(decoded.accountId);
+      const account = (await this.authService.getProfile(
+        decoded.accountId,
+      )) as ProfileAccount | null;
       if (!account) {
         return res.status(404).json({ error: 'Account not found' });
       }
 
-      const customer = (account as any).customer;
       return res.status(200).json({
         account: {
           id: account.AccountID,
@@ -308,11 +358,11 @@ export class AuthController {
           username: account.Username,
           avatar: account.Avatar,
           status: account.Status,
-          role: (account as any).role?.RoleName,
+          role: account.role?.RoleName,
           createdAt: account.CreatedAt,
           updatedAt: account.UpdatedAt,
         },
-        customer,
+        customer: account.customer,
       });
     } catch (error) {
       // eslint-disable-next-line no-console
@@ -478,7 +528,7 @@ export class AuthController {
       const googleUser = await this.authService.verifyGoogleToken(
         body.credential,
       );
-      let user;
+      let user: GoogleAccount | null;
       try {
         user = await this.authService.findOrCreateGoogleUser(googleUser);
       } catch (err) {
@@ -526,7 +576,7 @@ export class AuthController {
   }
 
   @Get('google/authorize')
-  async googleAuthorize(@Res() res: Response) {
+  googleAuthorize(@Res() res: Response) {
     const clientId = process.env.GOOGLE_CLIENT_ID;
     if (!clientId) {
       console.warn(
