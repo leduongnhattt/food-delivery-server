@@ -1,0 +1,126 @@
+# CI for food-delivery-server (NestJS)
+name: CI (Server)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'food-delivery-server/**'
+      - '.github/workflows/ci-server.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'food-delivery-server/**'
+      - '.github/workflows/ci-server.yml'
+
+defaults:
+  run:
+    working-directory: food-delivery-server
+
+env:
+  CI: true
+  PRISMA_HIDE_UPDATE_MESSAGE: 1
+  NODE_ENV: test
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['20']
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: ci
+          MYSQL_DATABASE: food_delivery
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd='mysqladmin ping -pci'
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=3
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: food-delivery-server/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npm run db:generate
+
+      - name: Wait for MySQL
+        run: |
+          for i in $(seq 1 30); do
+            if (echo > /dev/tcp/127.0.0.1/3306) 2>/dev/null; then
+              echo "MySQL is ready."
+              exit 0
+            fi
+            echo "Waiting for MySQL... ($i/30)"
+            sleep 2
+          done
+          echo "MySQL did not become ready in time."
+          exit 1
+
+      - name: Prisma DB push (schema sync for CI)
+        env:
+          DATABASE_URL: mysql://root:ci@127.0.0.1:3306/food_delivery
+        run: npx prisma db push --accept-data-loss
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        env:
+          DATABASE_URL: mysql://root:ci@127.0.0.1:3306/food_delivery
+          REDIS_URL: redis://127.0.0.1:6379
+          JWT_SECRET: ci-jwt-secret-min-32-chars-for-build-only
+        run: npm run build
+
+      - name: Unit tests
+        env:
+          DATABASE_URL: mysql://root:ci@127.0.0.1:3306/food_delivery
+          REDIS_URL: redis://127.0.0.1:6379
+          JWT_SECRET: ci-jwt-secret-min-32-chars-for-build-only
+        run: npm run test -- --passWithNoTests
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build server image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./food-delivery-server
+          push: false
+          load: true
+          tags: food-delivery-server:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
