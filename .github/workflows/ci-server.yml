@@ -1,21 +1,12 @@
 # CI for food-delivery-server (NestJS)
+# Repo này chỉ chứa server → mọi đường dẫn đều tính từ root hiện tại.
 name: CI (Server)
 
 on:
   push:
-    branches: [main]
-    paths:
-      - 'food-delivery-server/**'
-      - '.github/workflows/ci-server.yml'
+    branches: [main, master]
   pull_request:
-    branches: [main]
-    paths:
-      - 'food-delivery-server/**'
-      - '.github/workflows/ci-server.yml'
-
-defaults:
-  run:
-    working-directory: food-delivery-server
+    branches: [main, master]
 
 env:
   CI: true
@@ -38,21 +29,11 @@ jobs:
           MYSQL_DATABASE: food_delivery
         ports:
           - 3306:3306
-        options: >-
-          --health-cmd='mysqladmin ping -pci'
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=5
 
       redis:
         image: redis:7-alpine
         ports:
           - 6379:6379
-        options: >-
-          --health-cmd="redis-cli ping"
-          --health-interval=5s
-          --health-timeout=3s
-          --health-retries=3
 
     steps:
       - name: Checkout
@@ -63,7 +44,7 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           cache: npm
-          cache-dependency-path: food-delivery-server/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -118,7 +99,7 @@ jobs:
       - name: Build server image
         uses: docker/build-push-action@v6
         with:
-          context: ./food-delivery-server
+          context: .
           push: false
           load: true
           tags: food-delivery-server:ci
