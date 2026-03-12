@@ -1,21 +1,8 @@
-import {
-  Body,
-  Controller,
-  Get,
-  Post,
-  Query,
-  Req,
-  Res,
-} from '@nestjs/common';
+import { Body, Controller, Post, Req, Res } from '@nestjs/common';
 import { AuthService } from '@modules/auth/auth.service';
+import { AuthPasswordService } from '@modules/auth/password/password.service';
 import { AuthRepository } from '@infra/repositories/auth.repository';
 import type { Request, Response } from 'express';
-import { OAuth2Client } from 'google-auth-library';
-import {
-  getGoogleAuthorizePageHtml,
-  getGoogleCallbackPageHtml,
-  type GoogleCallbackMessage,
-} from '@infra/templates/oauth.templates';
 
 interface RegisterBody {
   username?: string;
@@ -39,26 +26,6 @@ interface BasicAccount {
   customer?: unknown;
 }
 
-interface ProfileAccount {
-  AccountID: string;
-  Email: string;
-  Username: string;
-  Avatar: string | null;
-  Status: string;
-  CreatedAt: Date;
-  UpdatedAt: Date;
-  role?: { RoleName: string } | null;
-  customer?: unknown;
-}
-
-interface GoogleAccount {
-  AccountID: string;
-  Username: string;
-  Email: string;
-  Status: string;
-  role?: { RoleName: string } | null;
-}
-
 function parseCookies(cookieHeader: string | undefined): Record<string, string> {
   const cookies: Record<string, string> = {};
   if (!cookieHeader) return cookies;
@@ -79,6 +46,7 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly authRepo: AuthRepository,
+    private readonly authPasswordService: AuthPasswordService,
   ) {}
 
   @Post('register')
@@ -145,7 +113,7 @@ export class AuthController {
         });
       }
 
-      const passwordHash = await this.authService.hashPassword(password);
+      const passwordHash = await this.authPasswordService.hashPassword(password);
       const account = (await this.authService.createAccount({
         username,
         email,
@@ -199,7 +167,7 @@ export class AuthController {
       }
 
       const passwordHash = account.PasswordHash ?? '';
-      const isPasswordValid = await this.authService.verifyPassword(
+      const isPasswordValid = await this.authPasswordService.verifyPassword(
         password,
         passwordHash,
       );
@@ -326,350 +294,6 @@ export class AuthController {
       // eslint-disable-next-line no-console
       console.error('Logout error:', error);
       return res.status(200).json({ success: true });
-    }
-  }
-
-  @Get('profile')
-  async profile(@Req() req: Request, @Res() res: Response) {
-    try {
-      const authHeader = req.headers['authorization'];
-      const token = authHeader?.replace('Bearer ', '');
-
-      if (!token) {
-        return res.status(401).json({ error: 'Unauthorized' });
-      }
-
-      const decoded = this.authService.verifyAccessToken(token);
-      if (!decoded) {
-        return res.status(401).json({ error: 'Invalid or expired token' });
-      }
-
-      const account = (await this.authService.getProfile(
-        decoded.accountId,
-      )) as ProfileAccount | null;
-      if (!account) {
-        return res.status(404).json({ error: 'Account not found' });
-      }
-
-      return res.status(200).json({
-        account: {
-          id: account.AccountID,
-          email: account.Email,
-          username: account.Username,
-          avatar: account.Avatar,
-          status: account.Status,
-          role: account.role?.RoleName,
-          createdAt: account.CreatedAt,
-          updatedAt: account.UpdatedAt,
-        },
-        customer: account.customer,
-      });
-    } catch (error) {
-      // eslint-disable-next-line no-console
-      console.error('Get profile error:', error);
-      return res.status(500).json({ error: 'Failed to get profile' });
-    }
-  }
-
-  @Post('forgot-password')
-  async forgotPassword(@Body() body: { email?: string }, @Res() res: Response) {
-    try {
-      const result = await this.authService.forgotPassword(body?.email ?? '');
-      if (result.error) {
-        const status = result.error.includes('Too many') ? 429 : 400;
-        return res.status(status).json({ error: result.error });
-      }
-      return res.status(200).json({
-        success: true,
-        message:
-          'If an account with this email exists, a reset code has been sent.',
-      });
-    } catch (error) {
-      console.error('Forgot password error:', error);
-      return res.status(500).json({
-        error: 'An unexpected error occurred. Please try again.',
-      });
-    }
-  }
-
-  @Post('verify-reset-code')
-  async verifyResetCode(
-    @Body() body: { email?: string; code?: string },
-    @Res() res: Response,
-  ) {
-    try {
-      const result = await this.authService.verifyResetCode(
-        body?.email ?? '',
-        body?.code ?? '',
-      );
-      if (!result.success) {
-        return res
-          .status(400)
-          .json({ error: result.error ?? 'Invalid or expired reset code' });
-      }
-      return res.status(200).json({
-        success: true,
-        message: 'Reset code verified successfully',
-        tokenId: result.tokenId,
-      });
-    } catch (error) {
-      console.error('Verify reset code error:', error);
-      return res.status(500).json({
-        error: 'An unexpected error occurred. Please try again.',
-      });
-    }
-  }
-
-  @Post('resend-reset-code')
-  async resendResetCode(
-    @Body() body: { email?: string },
-    @Res() res: Response,
-  ) {
-    try {
-      const result = await this.authService.resendResetCode(body?.email ?? '');
-      if (result.error) {
-        const status = result.error.includes('Too many') ? 429 : 404;
-        return res.status(status).json({ error: result.error });
-      }
-      return res.status(200).json({
-        success: true,
-        message: 'New reset code has been sent to your email',
-      });
-    } catch (error) {
-      console.error('Resend reset code error:', error);
-      return res.status(500).json({
-        error: 'An unexpected error occurred. Please try again.',
-      });
-    }
-  }
-
-  @Post('reset-password')
-  async resetPassword(
-    @Body() body: { tokenId?: string; newPassword?: string },
-    @Res() res: Response,
-  ) {
-    try {
-      const result = await this.authService.resetPassword(
-        body?.tokenId ?? '',
-        body?.newPassword ?? '',
-      );
-      if (!result.success) {
-        return res.status(400).json({
-          error: result.error ?? 'Invalid or expired reset token',
-        });
-      }
-      return res.status(200).json({
-        success: true,
-        message:
-          'Password has been reset successfully. Please log in with your new password.',
-      });
-    } catch (error) {
-      console.error('Reset password error:', error);
-      return res.status(500).json({
-        error: 'An unexpected error occurred. Please try again.',
-      });
-    }
-  }
-
-  @Post('change-password')
-  async changePassword(
-    @Req() req: Request,
-    @Body() body: { currentPassword?: string; newPassword?: string },
-    @Res() res: Response,
-  ) {
-    try {
-      const authHeader = req.headers['authorization'];
-      const token = authHeader?.replace('Bearer ', '');
-      if (!token) {
-        return res.status(401).json({ error: 'Unauthorized' });
-      }
-      const decoded = this.authService.verifyAccessToken(token);
-      if (!decoded) {
-        return res.status(401).json({ error: 'Invalid or expired token' });
-      }
-      const result = await this.authService.changePassword(
-        decoded.accountId,
-        body?.currentPassword ?? '',
-        body?.newPassword ?? '',
-      );
-      if (!result.success) {
-        const status =
-          result.error === 'User account not found'
-            ? 404
-            : result.error === 'Unauthorized' || result.error === 'Invalid or expired token'
-              ? 401
-              : 400;
-        return res.status(status).json({ error: result.error });
-      }
-      return res.status(200).json({
-        success: true,
-        message:
-          'Password has been changed successfully. Please log in again.',
-      });
-    } catch (error) {
-      console.error('Change password error:', error);
-      return res.status(500).json({
-        error: 'An unexpected error occurred. Please try again.',
-      });
-    }
-  }
-
-  @Post('google')
-  async googleLogin(
-    @Body() body: { credential?: string },
-    @Res() res: Response,
-  ) {
-    try {
-      if (!body?.credential) {
-        return res.status(400).json({
-          error: 'Google credential is required',
-        });
-      }
-      const googleUser = await this.authService.verifyGoogleToken(
-        body.credential,
-      );
-      let user: GoogleAccount | null;
-      try {
-        user = await this.authService.findOrCreateGoogleUser(googleUser);
-      } catch (err) {
-        console.error('Google user creation error:', err);
-        return res.status(400).json({
-          error:
-            err instanceof Error ? err.message : 'Failed to create user account',
-        });
-      }
-      if (!user?.role || user.role.RoleName !== 'Customer') {
-        return res.status(403).json({
-          error: 'Access denied. This login is for customers only.',
-        });
-      }
-      const { accessToken, refreshToken, expiredAt } =
-        await this.authService.issueTokens(
-          user.AccountID,
-          user.role?.RoleName ?? 'Customer',
-          'google',
-        );
-      res.cookie('refresh_token', refreshToken, {
-        httpOnly: true,
-        sameSite: 'lax',
-        secure: process.env.NODE_ENV === 'production',
-        path: '/',
-        expires: expiredAt,
-      });
-      return res.status(200).json({
-        success: true,
-        user: {
-          id: user.AccountID,
-          username: user.Username,
-          email: user.Email,
-          role: user.role?.RoleName ?? 'Customer',
-          status: user.Status,
-        },
-        accessToken,
-      });
-    } catch (error) {
-      console.error('Google login error:', error);
-      return res.status(500).json({
-        error: 'Google authentication failed',
-      });
-    }
-  }
-
-  @Get('google/authorize')
-  googleAuthorize(@Res() res: Response) {
-    const clientId = process.env.GOOGLE_CLIENT_ID;
-    if (!clientId) {
-      console.warn(
-        '[auth] GOOGLE_CLIENT_ID is not set. Add it to food-delivery-server/.env',
-      );
-      return res.status(500).send('Google OAuth not configured');
-    }
-    let baseUrl =
-      process.env.API_URL ||
-      process.env.SERVER_PUBLIC_URL ||
-      `http://localhost:${process.env.PORT || 3001}`;
-    baseUrl = baseUrl.replace(/\/$/, ''); // no trailing slash
-    const redirectUri = `${baseUrl}/api/auth/google/callback`;
-    console.log(
-      '[Google OAuth] Add this EXACT URL in Google Console → Authorized redirect URIs:\n  ' +
-        redirectUri,
-    );
-    const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
-    url.searchParams.set('client_id', clientId);
-    url.searchParams.set('redirect_uri', redirectUri);
-    url.searchParams.set('response_type', 'code');
-    url.searchParams.set('scope', 'email profile');
-    url.searchParams.set('prompt', 'select_account');
-    url.searchParams.set('access_type', 'offline');
-    const html = getGoogleAuthorizePageHtml(url.toString());
-    res.setHeader('Content-Type', 'text/html');
-    return res.send(html);
-  }
-
-  @Get('google/callback')
-  async googleCallback(
-    @Query('code') code: string | undefined,
-    @Query('error') error: string | undefined,
-    @Res() res: Response,
-  ) {
-    const frontendOrigin =
-      process.env.FRONTEND_ORIGIN || process.env.CORS_ORIGIN || 'http://localhost:3000';
-    const targetOrigin = frontendOrigin.split(',')[0].trim();
-
-    const sendHtml = (messageData: GoogleCallbackMessage) => {
-      const html = getGoogleCallbackPageHtml(messageData, targetOrigin);
-      res.setHeader('Content-Type', 'text/html');
-      return res.send(html);
-    };
-
-    if (error) {
-      return sendHtml({
-        type: 'GOOGLE_AUTH_ERROR',
-        error: 'Google authentication was denied or failed',
-      });
-    }
-    if (!code) {
-      return sendHtml({
-        type: 'GOOGLE_AUTH_ERROR',
-        error: 'Authorization code is missing',
-      });
-    }
-    try {
-      if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
-        return sendHtml({
-          type: 'GOOGLE_AUTH_ERROR',
-          error: 'OAuth configuration error',
-        });
-      }
-      const baseUrl = (
-        process.env.API_URL ||
-        process.env.SERVER_PUBLIC_URL ||
-        `http://localhost:${process.env.PORT || 3001}`
-      ).replace(/\/$/, '');
-      const redirectUri = `${baseUrl}/api/auth/google/callback`;
-      const oauth2Client = new OAuth2Client(
-        process.env.GOOGLE_CLIENT_ID,
-        process.env.GOOGLE_CLIENT_SECRET,
-        redirectUri,
-      );
-      const { tokens } = await oauth2Client.getToken(code);
-      const idToken = tokens.id_token;
-      if (!idToken) {
-        return sendHtml({
-          type: 'GOOGLE_AUTH_ERROR',
-          error: 'ID token not received from Google',
-        });
-      }
-      return sendHtml({
-        type: 'GOOGLE_AUTH_SUCCESS',
-        credential: idToken,
-      });
-    } catch (err) {
-      console.error('Google callback error:', err);
-      return sendHtml({
-        type: 'GOOGLE_AUTH_ERROR',
-        error: 'Failed to authenticate with Google',
-      });
     }
   }
 }
