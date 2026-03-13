@@ -161,4 +161,3 @@ export class AuthGoogleService {
     return this.createGoogleAccount(googleUser);
   }
 }
-

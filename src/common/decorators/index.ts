@@ -1,2 +1,1 @@
-export {};
-
+export * from './current-account.decorator';

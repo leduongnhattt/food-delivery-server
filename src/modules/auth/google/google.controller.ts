@@ -42,11 +42,12 @@ export class AuthGoogleController {
       try {
         user = await this.authGoogleService.findOrCreateGoogleUser(googleUser);
       } catch (err) {
-        // eslint-disable-next-line no-console
         console.error('Google user creation error:', err);
         return res.status(400).json({
           error:
-            err instanceof Error ? err.message : 'Failed to create user account',
+            err instanceof Error
+              ? err.message
+              : 'Failed to create user account',
         });
       }
       if (!user?.role || user.role.RoleName !== 'Customer') {
@@ -79,7 +80,6 @@ export class AuthGoogleController {
         accessToken,
       });
     } catch (error) {
-      // eslint-disable-next-line no-console
       console.error('Google login error:', error);
       return res.status(500).json({
         error: 'Google authentication failed',
@@ -91,7 +91,6 @@ export class AuthGoogleController {
   googleAuthorize(@Res() res: Response) {
     const clientId = process.env.GOOGLE_CLIENT_ID;
     if (!clientId) {
-      // eslint-disable-next-line no-console
       console.warn(
         '[auth] GOOGLE_CLIENT_ID is not set. Add it to food-delivery-server/.env',
       );
@@ -103,7 +102,7 @@ export class AuthGoogleController {
       `http://localhost:${process.env.PORT || 3001}`;
     baseUrl = baseUrl.replace(/\/$/, ''); // no trailing slash
     const redirectUri = `${baseUrl}/api/auth/google/callback`;
-    // eslint-disable-next-line no-console
+
     console.log(
       '[Google OAuth] Add this EXACT URL in Google Console → Authorized redirect URIs:\n  ' +
         redirectUri,
@@ -151,10 +150,7 @@ export class AuthGoogleController {
       });
     }
     try {
-      if (
-        !process.env.GOOGLE_CLIENT_ID ||
-        !process.env.GOOGLE_CLIENT_SECRET
-      ) {
+      if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
         return sendHtml({
           type: 'GOOGLE_AUTH_ERROR',
           error: 'OAuth configuration error',
@@ -184,7 +180,6 @@ export class AuthGoogleController {
         credential: idToken,
       });
     } catch (err) {
-      // eslint-disable-next-line no-console
       console.error('Google callback error:', err);
       return sendHtml({
         type: 'GOOGLE_AUTH_ERROR',
@@ -193,4 +188,3 @@ export class AuthGoogleController {
     }
   }
 }
-
