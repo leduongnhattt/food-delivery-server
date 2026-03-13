@@ -7,9 +7,18 @@ import { AuthModule } from '@modules/auth/auth.module';
 import { RestaurantsModule } from '@modules/restaurants/restaurants.module';
 import { ReviewsModule } from '@modules/reviews/reviews.module';
 import { CartModule } from '@modules/cart/cart.module';
+import { CustomersModule } from '@modules/customers/customers.module';
 
 @Module({
-  imports: [PrismaModule, FoodsModule, AuthModule, RestaurantsModule, ReviewsModule, CartModule],
+  imports: [
+    PrismaModule,
+    FoodsModule,
+    AuthModule,
+    RestaurantsModule,
+    ReviewsModule,
+    CartModule,
+    CustomersModule,
+  ],
   controllers: [AppController],
   providers: [AppService],
 })

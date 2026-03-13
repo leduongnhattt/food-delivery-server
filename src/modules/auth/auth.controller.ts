@@ -26,7 +26,9 @@ interface BasicAccount {
   customer?: unknown;
 }
 
-function parseCookies(cookieHeader: string | undefined): Record<string, string> {
+function parseCookies(
+  cookieHeader: string | undefined,
+): Record<string, string> {
   const cookies: Record<string, string> = {};
   if (!cookieHeader) return cookies;
   const parts = cookieHeader.split(';');
@@ -113,7 +115,8 @@ export class AuthController {
         });
       }
 
-      const passwordHash = await this.authPasswordService.hashPassword(password);
+      const passwordHash =
+        await this.authPasswordService.hashPassword(password);
       const account = (await this.authService.createAccount({
         username,
         email,
@@ -133,7 +136,6 @@ export class AuthController {
         },
       });
     } catch (error) {
-      // eslint-disable-next-line no-console
       console.error('Registration error:', error);
       return res.status(500).json({
         error: 'signup.errors.unexpectedError',
@@ -223,7 +225,6 @@ export class AuthController {
         accessToken,
       });
     } catch (error) {
-      // eslint-disable-next-line no-console
       console.error('Login error:', error);
       return res.status(500).json({
         error: 'Login failed',
@@ -243,7 +244,9 @@ export class AuthController {
       }
 
       if (!accountId) {
-        accountId = (await this.authService.getAccountIdFromRefreshToken(refreshToken)) ?? '';
+        accountId =
+          (await this.authService.getAccountIdFromRefreshToken(refreshToken)) ??
+          '';
       }
 
       if (!accountId) {
@@ -260,7 +263,6 @@ export class AuthController {
 
       return res.status(200).json({ accessToken });
     } catch (error) {
-      // eslint-disable-next-line no-console
       console.error('Refresh error:', error);
       return res.status(500).json({ error: 'Refresh failed' });
     }
@@ -284,17 +286,16 @@ export class AuthController {
         return res.status(200).json({ success: true });
       }
 
-      const accountId = await this.authService.getAccountIdFromRefreshToken(refreshToken);
+      const accountId =
+        await this.authService.getAccountIdFromRefreshToken(refreshToken);
       if (accountId) {
         await this.authService.revokeAllRefreshTokensForAccount(accountId);
       }
 
       return res.status(200).json({ success: true });
     } catch (error) {
-      // eslint-disable-next-line no-console
       console.error('Logout error:', error);
       return res.status(200).json({ success: true });
     }
   }
 }
-

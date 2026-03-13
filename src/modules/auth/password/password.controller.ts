@@ -1,7 +1,9 @@
-import { Body, Controller, Post, Req, Res } from '@nestjs/common';
-import type { Request, Response } from 'express';
-import { AuthService } from '@modules/auth/auth.service';
+import { Body, Controller, Post, Res, UseGuards } from '@nestjs/common';
+import type { Response } from 'express';
+import { AuthService, type JwtPayload } from '@modules/auth/auth.service';
 import { AuthPasswordService } from './password.service';
+import { JwtAuthGuard } from '@common/guards';
+import { CurrentAccount } from '@common/decorators';
 
 @Controller('auth')
 export class AuthPasswordController {
@@ -26,7 +28,6 @@ export class AuthPasswordController {
           'If an account with this email exists, a reset code has been sent.',
       });
     } catch (error) {
-      // eslint-disable-next-line no-console
       console.error('Forgot password error:', error);
       return res.status(500).json({
         error: 'An unexpected error occurred. Please try again.',
@@ -55,7 +56,6 @@ export class AuthPasswordController {
         tokenId: result.tokenId,
       });
     } catch (error) {
-      // eslint-disable-next-line no-console
       console.error('Verify reset code error:', error);
       return res.status(500).json({
         error: 'An unexpected error occurred. Please try again.',
@@ -81,7 +81,6 @@ export class AuthPasswordController {
         message: 'New reset code has been sent to your email',
       });
     } catch (error) {
-      // eslint-disable-next-line no-console
       console.error('Resend reset code error:', error);
       return res.status(500).json({
         error: 'An unexpected error occurred. Please try again.',
@@ -110,7 +109,6 @@ export class AuthPasswordController {
           'Password has been reset successfully. Please log in with your new password.',
       });
     } catch (error) {
-      // eslint-disable-next-line no-console
       console.error('Reset password error:', error);
       return res.status(500).json({
         error: 'An unexpected error occurred. Please try again.',
@@ -119,23 +117,18 @@ export class AuthPasswordController {
   }
 
   @Post('change-password')
+  @UseGuards(JwtAuthGuard)
   async changePassword(
-    @Req() req: Request,
+    @CurrentAccount() account: JwtPayload | null,
     @Body() body: { currentPassword?: string; newPassword?: string },
     @Res() res: Response,
   ) {
     try {
-      const authHeader = req.headers['authorization'];
-      const token = authHeader?.replace('Bearer ', '');
-      if (!token) {
-        return res.status(401).json({ error: 'Unauthorized' });
-      }
-      const decoded = this.authService.verifyAccessToken(token);
-      if (!decoded) {
+      if (!account) {
         return res.status(401).json({ error: 'Invalid or expired token' });
       }
       const result = await this.authPasswordService.changePassword(
-        decoded.accountId,
+        account.accountId,
         body?.currentPassword ?? '',
         body?.newPassword ?? '',
       );
@@ -151,11 +144,9 @@ export class AuthPasswordController {
       }
       return res.status(200).json({
         success: true,
-        message:
-          'Password has been changed successfully. Please log in again.',
+        message: 'Password has been changed successfully. Please log in again.',
       });
     } catch (error) {
-      // eslint-disable-next-line no-console
       console.error('Change password error:', error);
       return res.status(500).json({
         error: 'An unexpected error occurred. Please try again.',
@@ -163,4 +154,3 @@ export class AuthPasswordController {
     }
   }
 }
-

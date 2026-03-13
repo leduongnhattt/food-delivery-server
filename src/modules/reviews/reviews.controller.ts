@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -8,12 +9,14 @@ import {
   Query,
   Req,
   UnauthorizedException,
+  UseGuards,
   UseInterceptors,
-  BadRequestException,
 } from '@nestjs/common';
 import { FileFieldsInterceptor } from '@nestjs/platform-express/multer';
 import type { Request } from 'express';
-import { AuthService } from '@modules/auth/auth.service';
+import { AuthService, type JwtPayload } from '@modules/auth/auth.service';
+import { JwtAuthGuard } from '@common/guards';
+import { CurrentAccount } from '@common/decorators';
 import { ReviewsService } from '@modules/reviews/reviews.service';
 
 type UploadedImageFile = {
@@ -28,23 +31,6 @@ interface RequestWithFiles extends Request {
   };
 }
 
-function getAccountIdFromRequest(
-  req: Request,
-  authService: AuthService,
-): string | null {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader?.replace(/^Bearer\s+/i, '');
-  if (!token) return null;
-  const decoded = authService.verifyAccessToken(token);
-  return decoded?.accountId ?? null;
-}
-
-function requireAccountId(req: Request, authService: AuthService): string {
-  const accountId = getAccountIdFromRequest(req, authService);
-  if (!accountId) throw new UnauthorizedException('Unauthorized');
-  return accountId;
-}
-
 @Controller()
 export class ReviewsController {
   constructor(
@@ -53,12 +39,17 @@ export class ReviewsController {
   ) {}
 
   @Post('reviews')
+  @UseGuards(JwtAuthGuard)
   @UseInterceptors(FileFieldsInterceptor([{ name: 'images', maxCount: 6 }]))
   async createReview(
     @Req() req: Request,
+    @CurrentAccount() account: JwtPayload | null,
     @Body() body: { enterpriseId?: string; rating?: string; comment?: string },
   ) {
-    const accountId = requireAccountId(req, this.authService);
+    if (!account || !account.accountId) {
+      throw new UnauthorizedException('Unauthorized');
+    }
+    const accountId = account.accountId;
     const { files: requestFiles } = req as RequestWithFiles;
     const files = requestFiles?.images;
     const imageBuffers = Array.isArray(files)
@@ -87,8 +78,10 @@ export class ReviewsController {
   }
 
   @Get('enterprise/reviews')
+  @UseGuards(JwtAuthGuard)
   async getEnterpriseReviews(
     @Req() req: Request,
+    @CurrentAccount() account: JwtPayload | null,
     @Query('q') q?: string,
     @Query('rating') rating?: string,
     @Query('status') status?: string,
@@ -98,7 +91,10 @@ export class ReviewsController {
     @Query('page') pageStr?: string,
     @Query('limit') limitStr?: string,
   ) {
-    const accountId = requireAccountId(req, this.authService);
+    if (!account || !account.accountId) {
+      throw new UnauthorizedException('Unauthorized');
+    }
+    const accountId = account.accountId;
     return this.reviewsService.getEnterpriseReviews(accountId, {
       q,
       rating,
@@ -112,12 +108,17 @@ export class ReviewsController {
   }
 
   @Patch('enterprise/reviews/:id')
+  @UseGuards(JwtAuthGuard)
   async patchEnterpriseReview(
     @Req() req: Request,
+    @CurrentAccount() account: JwtPayload | null,
     @Param('id') id: string,
     @Body() body: { isHidden?: boolean },
   ) {
-    const accountId = requireAccountId(req, this.authService);
+    if (!account || !account.accountId) {
+      throw new UnauthorizedException('Unauthorized');
+    }
+    const accountId = account.accountId;
     if (typeof body.isHidden !== 'boolean') {
       throw new BadRequestException(
         'Invalid payload: isHidden must be a boolean',
@@ -131,15 +132,19 @@ export class ReviewsController {
   }
 
   @Get('admin/reviews')
+  @UseGuards(JwtAuthGuard)
   async getAdminReviews(
     @Req() req: Request,
+    @CurrentAccount() account: JwtPayload | null,
     @Query('q') q?: string,
     @Query('enterpriseId') enterpriseId?: string,
     @Query('status') status?: string,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
   ) {
-    requireAccountId(req, this.authService);
+    if (!account || !account.accountId) {
+      throw new UnauthorizedException('Unauthorized');
+    }
     return this.reviewsService.getAdminReviews({
       q,
       enterpriseId,
@@ -150,12 +155,15 @@ export class ReviewsController {
   }
 
   @Patch('admin/reviews/:id')
+  @UseGuards(JwtAuthGuard)
   async patchAdminReview(
-    @Req() req: Request,
+    @CurrentAccount() account: JwtPayload | null,
     @Param('id') id: string,
     @Body() body: { isHidden?: boolean },
   ) {
-    requireAccountId(req, this.authService);
+    if (!account || !account.accountId) {
+      throw new UnauthorizedException('Unauthorized');
+    }
     if (typeof body.isHidden !== 'boolean') {
       throw new BadRequestException('isHidden must be a boolean');
     }

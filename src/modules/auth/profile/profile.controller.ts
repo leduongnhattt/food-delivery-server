@@ -1,6 +1,8 @@
-import { Controller, Get, Req, Res } from '@nestjs/common';
-import type { Request, Response } from 'express';
-import { AuthService } from '@modules/auth/auth.service';
+import { Controller, Get, Res, UseGuards } from '@nestjs/common';
+import type { Response } from 'express';
+import { AuthService, type JwtPayload } from '@modules/auth/auth.service';
+import { JwtAuthGuard } from '@common/guards';
+import { CurrentAccount } from '@common/decorators';
 
 interface ProfileAccount {
   AccountID: string;
@@ -19,22 +21,14 @@ export class AuthProfileController {
   constructor(private readonly authService: AuthService) {}
 
   @Get('profile')
-  async profile(@Req() req: Request, @Res() res: Response) {
+  @UseGuards(JwtAuthGuard)
+  async profile(
+    @CurrentAccount() accountToken: JwtPayload | null,
+    @Res() res: Response,
+  ) {
     try {
-      const authHeader = req.headers['authorization'];
-      const token = authHeader?.replace('Bearer ', '');
-
-      if (!token) {
-        return res.status(401).json({ error: 'Unauthorized' });
-      }
-
-      const decoded = this.authService.verifyAccessToken(token);
-      if (!decoded) {
-        return res.status(401).json({ error: 'Invalid or expired token' });
-      }
-
       const account = (await this.authService.getProfile(
-        decoded.accountId,
+        accountToken?.accountId ?? '',
       )) as ProfileAccount | null;
       if (!account) {
         return res.status(404).json({ error: 'Account not found' });
@@ -54,10 +48,8 @@ export class AuthProfileController {
         customer: account.customer,
       });
     } catch (error) {
-      // eslint-disable-next-line no-console
       console.error('Get profile error:', error);
       return res.status(500).json({ error: 'Failed to get profile' });
     }
   }
 }
-

@@ -180,7 +180,6 @@ export class AuthService {
     await this.authRepo.revokeAllAuthTokensForAccount(accountId);
   }
 
-
   verifyAccessToken(token: string): JwtPayload | null {
     try {
       const decoded = safeJwtVerify(token, this.jwtSecret);
@@ -196,6 +195,10 @@ export class AuthService {
       withRole: true,
       withCustomer: true,
     });
+  }
+
+  async updateAvatar(accountId: string, avatarUrl: string): Promise<void> {
+    await this.authRepo.updateAccount(accountId, { Avatar: avatarUrl });
   }
 
   /** Returns accountId from refresh token (for refresh or logout). */
