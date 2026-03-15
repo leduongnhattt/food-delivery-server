@@ -15,6 +15,12 @@ export class JwtAuthGuard implements CanActivate {
     const req = context
       .switchToHttp()
       .getRequest<Request & { account?: JwtPayload }>();
+    const path = (req.url || req.path || '').split('?')[0];
+    // Allow refresh (and other auth public routes) without requiring valid JWT
+    if (path.endsWith('/auth/refresh') || path.endsWith('/auth/login') || path.endsWith('/auth/register')) {
+      return true;
+    }
+
     const authHeader = req.headers['authorization'];
     const token =
       typeof authHeader === 'string' && authHeader.startsWith('Bearer ')
