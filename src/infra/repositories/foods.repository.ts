@@ -187,4 +187,121 @@ export class FoodsRepository {
       },
     });
   }
+
+  /**
+   * Fetch food details for admin/editor screens.
+   * Includes category and menu links (menu -> enterprise).
+   */
+  async findByIdDetailed(foodId: string) {
+    if (!foodId) return null;
+    return this.prisma.food.findUnique({
+      where: { FoodID: foodId },
+      include: {
+        foodCategory: true,
+        menuFoods: {
+          include: {
+            menu: {
+              include: {
+                enterprise: true,
+              },
+            },
+          },
+        },
+      },
+    });
+  }
+
+  async findEnterpriseById(enterpriseId: string) {
+    if (!enterpriseId) return null;
+    return this.prisma.enterprise.findUnique({
+      where: { EnterpriseID: enterpriseId },
+      select: { EnterpriseID: true },
+    });
+  }
+
+  async findFoodCategoryByName(categoryName: string) {
+    if (!categoryName) return null;
+    return this.prisma.foodCategory.findFirst({
+      where: { CategoryName: categoryName },
+      select: { CategoryID: true, CategoryName: true },
+    });
+  }
+
+  async findFirstMenuForEnterprise(enterpriseId: string) {
+    if (!enterpriseId) return null;
+    return this.prisma.menu.findFirst({
+      where: { EnterpriseID: enterpriseId },
+      orderBy: { CreatedAt: 'asc' },
+      select: { MenuID: true },
+    });
+  }
+
+  async linkFoodToMenuIfNotLinked(foodId: string, menuId: string) {
+    if (!foodId || !menuId) return;
+    try {
+      await this.prisma.menuFood.create({
+        data: { FoodID: foodId, MenuID: menuId },
+      });
+    } catch {
+      // best-effort link; ignore unique violations or any errors
+    }
+  }
+
+  async createFood(data: {
+    DishName: string;
+    Description: string;
+    Price: number;
+    ImageURL?: string | null;
+    FoodCategoryID: string;
+    EnterpriseID: string;
+    IsAvailable: boolean;
+  }) {
+    return this.prisma.food.create({
+      data,
+      include: {
+        foodCategory: true,
+        menuFoods: {
+          include: {
+            menu: {
+              include: {
+                enterprise: true,
+              },
+            },
+          },
+        },
+      },
+    });
+  }
+
+  async updateFood(
+    foodId: string,
+    data: {
+      DishName?: string;
+      Description?: string;
+      Price?: number;
+      ImageURL?: string | null;
+      IsAvailable?: boolean;
+    },
+  ) {
+    return this.prisma.food.update({
+      where: { FoodID: foodId },
+      data,
+      include: {
+        foodCategory: true,
+        menuFoods: {
+          include: {
+            menu: {
+              include: {
+                enterprise: true,
+              },
+            },
+          },
+        },
+      },
+    });
+  }
+
+  async deleteFood(foodId: string) {
+    return this.prisma.food.delete({ where: { FoodID: foodId } });
+  }
 }

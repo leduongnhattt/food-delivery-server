@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Put, Query } from '@nestjs/common';
 import { FoodsService } from '@modules/foods/foods.service';
 
 @Controller('foods')
@@ -79,6 +79,55 @@ export class FoodsController {
   async byIds(@Body() body: { ids?: string[] }) {
     const ids = Array.isArray(body?.ids) ? body.ids : [];
     return this.foodsService.findByIds(ids);
+  }
+
+  @Get(':id')
+  async getById(@Param('id') id: string) {
+    return this.foodsService.getByIdDetailed(id);
+  }
+
+  @Post()
+  async create(
+    @Body()
+    body: {
+      name?: string;
+      description?: string;
+      price?: number | string;
+      image?: string | null;
+      category?: string;
+      isAvailable?: boolean;
+      restaurantId?: string;
+    },
+  ) {
+    return this.foodsService.createFoodFromMenuItemDto({
+      name: body.name ?? '',
+      description: body.description ?? '',
+      price: body.price ?? '',
+      image: body.image,
+      category: body.category ?? '',
+      isAvailable: body.isAvailable,
+      restaurantId: body.restaurantId ?? '',
+    });
+  }
+
+  @Put(':id')
+  async update(
+    @Param('id') id: string,
+    @Body()
+    body: {
+      name?: string;
+      description?: string;
+      price?: number | string;
+      image?: string | null;
+      isAvailable?: boolean;
+    },
+  ) {
+    return this.foodsService.updateFoodById(id, body);
+  }
+
+  @Delete(':id')
+  async remove(@Param('id') id: string) {
+    return this.foodsService.deleteFoodById(id);
   }
 }
 
