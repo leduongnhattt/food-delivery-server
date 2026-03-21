@@ -33,7 +33,7 @@ export interface FoodListCriteria {
  */
 @Injectable()
 export class FoodsRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) { }
 
   /**
    * Builds Prisma where clause from API criteria.
