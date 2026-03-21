@@ -1,6 +1,10 @@
 import {
   Body,
   Controller,
+  Get,
+  Param,
+  Patch,
+  Query,
   Post,
   UnauthorizedException,
   UseGuards,
@@ -13,11 +17,26 @@ import {
   AdminVouchersService,
 } from './admin-vouchers.service';
 
-@Controller('admin/voucher')
+@Controller('admin')
 export class AdminVouchersController {
   constructor(private readonly adminVouchersService: AdminVouchersService) {}
 
-  @Post()
+  @Get('vouchers')
+  @UseGuards(JwtAuthGuard, AdminRoleGuard)
+  list(
+    @CurrentAccount() account: JwtPayload | null,
+    @Query('status') status?: string,
+    @Query('q') q?: string,
+    @Query('limit') limit?: string,
+  ) {
+    if (!account?.accountId) {
+      throw new UnauthorizedException('Unauthorized');
+    }
+    const query = this.adminVouchersService.parseListQuery({ status, q, limit });
+    return this.adminVouchersService.listVouchers(query);
+  }
+
+  @Post('voucher')
   @UseGuards(JwtAuthGuard, AdminRoleGuard)
   create(
     @CurrentAccount() account: JwtPayload | null,
@@ -27,5 +46,17 @@ export class AdminVouchersController {
       throw new UnauthorizedException('Unauthorized');
     }
     return this.adminVouchersService.createVoucher(account.accountId, body);
+  }
+
+  @Patch('vouchers/:voucherId/approve')
+  @UseGuards(JwtAuthGuard, AdminRoleGuard)
+  approve(
+    @CurrentAccount() account: JwtPayload | null,
+    @Param('voucherId') voucherId: string,
+  ) {
+    if (!account?.accountId) {
+      throw new UnauthorizedException('Unauthorized');
+    }
+    return this.adminVouchersService.approveVoucher(voucherId);
   }
 }

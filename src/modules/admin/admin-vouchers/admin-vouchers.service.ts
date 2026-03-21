@@ -17,20 +17,25 @@ export interface AdminCreateVoucherBody {
   MaxUsage?: number | null;
 }
 
-/** Prisma P2002 `meta.target` may be a string, string[], or driver-specific shape — never `String(object)`. */
-function prismaUniqueFieldNames(target: unknown): string[] {
+export interface AdminVoucherListQuery {
+  status?: 'all' | 'pending' | 'approved';
+  q?: string;
+  limit?: number;
+}
+
+type PrismaMetaTarget = string | string[] | Record<string, string> | null | undefined;
+
+function prismaUniqueFieldNames(target: PrismaMetaTarget): string[] {
   if (target == null) {
     return [];
   }
   if (Array.isArray(target)) {
-    return target.map((item) =>
-      typeof item === 'string' ? item : JSON.stringify(item),
-    );
+    return target.map((item) => item);
   }
   if (typeof target === 'string') {
     return [target];
   }
-  return [JSON.stringify(target)];
+  return Object.values(target);
 }
 
 @Injectable()
@@ -53,6 +58,67 @@ export class AdminVouchersService {
     if (!hasPercent && !hasAmount) {
       throw new BadRequestException('Missing required fields');
     }
+  }
+
+  parseListQuery(input: {
+    status?: string;
+    q?: string;
+    limit?: string;
+  }): Required<AdminVoucherListQuery> {
+    const statusRaw = (input.status || 'all').toLowerCase();
+    const status: 'all' | 'pending' | 'approved' =
+      statusRaw === 'pending' || statusRaw === 'approved' ? statusRaw : 'all';
+    const q = (input.q || '').trim();
+    const parsedLimit = parseInt(input.limit || '50', 10);
+    const limit = Math.min(Math.max(parsedLimit || 50, 1), 200);
+    return { status, q, limit };
+  }
+
+  async listVouchers(query: Required<AdminVoucherListQuery>) {
+    const where: Prisma.VoucherWhereInput = {};
+    if (query.status === 'pending') where.Status = VoucherStatus.Pending;
+    if (query.status === 'approved') where.Status = VoucherStatus.Approved;
+    if (query.q) {
+      where.OR = [
+        { Code: { contains: query.q } },
+        { enterprise: { is: { EnterpriseName: { contains: query.q } } } },
+      ];
+    }
+
+    const rows = await this.prisma.voucher.findMany({
+      where,
+      orderBy: { CreatedAt: 'desc' },
+      take: query.limit,
+      select: {
+        VoucherID: true,
+        Code: true,
+        DiscountPercent: true,
+        DiscountAmount: true,
+        Status: true,
+        ExpiryDate: true,
+        MaxUsage: true,
+        UsedCount: true,
+        CreatedAt: true,
+        enterprise: { select: { EnterpriseName: true } },
+      },
+    });
+
+    return {
+      items: rows.map((row) => ({
+        id: row.VoucherID,
+        code: row.Code,
+        discountPercent:
+          row.DiscountPercent == null ? null : Number(row.DiscountPercent),
+        discountAmount:
+          row.DiscountAmount == null ? null : Number(row.DiscountAmount),
+        status: row.Status,
+        expiryDate: row.ExpiryDate?.toISOString() ?? null,
+        maxUsage: row.MaxUsage ?? null,
+        usedCount: row.UsedCount ?? 0,
+        createdAt: row.CreatedAt.toISOString(),
+        enterpriseName: row.enterprise?.EnterpriseName ?? null,
+      })),
+    };
   }
 
   async createVoucher(accountId: string, body: AdminCreateVoucherBody) {
@@ -102,12 +168,14 @@ export class AdminVouchersService {
 
       await this.vouchersService.invalidateApprovedListCache();
       return { success: true as const, voucher };
-    } catch (err: unknown) {
+    } catch (err) {
       if (
         err instanceof Prisma.PrismaClientKnownRequestError &&
         err.code === 'P2002'
       ) {
-        const fields = prismaUniqueFieldNames(err.meta?.target);
+        const fields = prismaUniqueFieldNames(
+          (err.meta?.target as PrismaMetaTarget) ?? null,
+        );
         if (fields.some((f) => f.includes('Code'))) {
           throw new ConflictException(
             'Voucher code already exists. Please use a different code.',
@@ -124,5 +192,23 @@ export class AdminVouchersService {
       }
       throw err;
     }
+  }
+
+  async approveVoucher(voucherId: string): Promise<{ success: true }> {
+    const existing = await this.prisma.voucher.findUnique({
+      where: { VoucherID: voucherId },
+      select: { VoucherID: true, Status: true },
+    });
+    if (!existing) {
+      throw new NotFoundException('Voucher not found');
+    }
+    if (existing.Status !== VoucherStatus.Approved) {
+      await this.prisma.voucher.update({
+        where: { VoucherID: voucherId },
+        data: { Status: VoucherStatus.Approved },
+      });
+      await this.vouchersService.invalidateApprovedListCache();
+    }
+    return { success: true };
   }
 }
