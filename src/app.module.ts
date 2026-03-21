@@ -14,6 +14,7 @@ import { PaymentsModule } from '@modules/payments/payments.module';
 import { VouchersModule } from '@modules/vouchers/vouchers.module';
 import { HealthModule } from '@modules/health/health.module';
 import { MenuItemsModule } from '@modules/menu-items/menu-items.module';
+import { AdminModule } from '@modules/admin/admin.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { MenuItemsModule } from '@modules/menu-items/menu-items.module';
     VouchersModule,
     HealthModule,
     MenuItemsModule,
+    AdminModule,
   ],
   controllers: [AppController],
   providers: [AppService],

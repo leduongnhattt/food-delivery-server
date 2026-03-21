@@ -131,42 +131,4 @@ export class ReviewsController {
     );
   }
 
-  @Get('admin/reviews')
-  @UseGuards(JwtAuthGuard)
-  async getAdminReviews(
-    @Req() req: Request,
-    @CurrentAccount() account: JwtPayload | null,
-    @Query('q') q?: string,
-    @Query('enterpriseId') enterpriseId?: string,
-    @Query('status') status?: string,
-    @Query('startDate') startDate?: string,
-    @Query('endDate') endDate?: string,
-  ) {
-    if (!account || !account.accountId) {
-      throw new UnauthorizedException('Unauthorized');
-    }
-    return this.reviewsService.getAdminReviews({
-      q,
-      enterpriseId,
-      status,
-      startDate,
-      endDate,
-    });
-  }
-
-  @Patch('admin/reviews/:id')
-  @UseGuards(JwtAuthGuard)
-  async patchAdminReview(
-    @CurrentAccount() account: JwtPayload | null,
-    @Param('id') id: string,
-    @Body() body: { isHidden?: boolean },
-  ) {
-    if (!account || !account.accountId) {
-      throw new UnauthorizedException('Unauthorized');
-    }
-    if (typeof body.isHidden !== 'boolean') {
-      throw new BadRequestException('isHidden must be a boolean');
-    }
-    return this.reviewsService.patchAdminReview(id, body.isHidden);
-  }
 }

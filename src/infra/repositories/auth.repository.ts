@@ -291,4 +291,38 @@ export class AuthRepository {
       });
     });
   }
+
+  createEnterprise(data: {
+    AccountID: string;
+    EnterpriseName: string;
+    Address: string;
+    PhoneNumber: string;
+    Description?: string | null;
+    OpenHours: string;
+    CloseHours: string;
+  }) {
+    return this.prisma.enterprise.create({
+      data: {
+        AccountID: data.AccountID,
+        EnterpriseName: data.EnterpriseName,
+        Address: data.Address,
+        PhoneNumber: data.PhoneNumber,
+        Description: data.Description ?? null,
+        OpenHours: data.OpenHours,
+        CloseHours: data.CloseHours,
+        IsActive: true,
+      },
+      select: {
+        EnterpriseID: true,
+        EnterpriseName: true,
+        Address: true,
+        PhoneNumber: true,
+        Description: true,
+        OpenHours: true,
+        CloseHours: true,
+        IsActive: true,
+        AccountID: true,
+      },
+    });
+  }
 }

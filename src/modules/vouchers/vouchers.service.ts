@@ -1,6 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@infra/prisma/prisma.service';
-import { getKeyJson, setKeyJson } from '@infra/redis/redis.service';
+import {
+  deleteKey,
+  deleteKeysMatchingPattern,
+  getKeyJson,
+  setKeyJson,
+} from '@infra/redis/redis.service';
 
 export interface VoucherDto {
   Code: string;
@@ -75,6 +80,14 @@ export class VouchersService {
     const list = rows.map(toVoucherDto);
     await setKeyJson(cacheKey, list, 300);
     return list;
+  }
+
+  /**
+   * Clears cached approved voucher lists (all TTL variants + legacy key used by Next.js).
+   */
+  async invalidateApprovedListCache(): Promise<void> {
+    await deleteKey('vouchers:approved:list');
+    await deleteKeysMatchingPattern('vouchers:approved:list:*');
   }
 }
 
