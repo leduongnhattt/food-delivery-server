@@ -46,6 +46,7 @@ model Account {
   authTokens  AuthToken[]
   driver      DeliveryDriver?
   passwordResetTokens PasswordResetToken[]
+  auditLogs   AuditLog[]
 
   @@index([RoleID])
   @@index([Locale])
@@ -100,7 +101,9 @@ model Enterprise {
   reviews   Review[]
   carts     Cart[]
   foods     Food[]
-  settlements Settlement[]
+  settlements                  Settlement[]
+  enterpriseCategoryCommissions EnterpriseCategoryCommission[]
+  deductionRules               DeductionRule[]
 
   @@index([AccountID])
   @@index([EnterpriseName])
@@ -119,6 +122,11 @@ model Admin {
   account  Account   @relation(fields: [AccountID], references: [AccountID], onDelete: Cascade)
   vouchers Voucher[]
   foodCategories FoodCategory[]
+  platformCommissionDefaultsUpdated     PlatformCommissionDefault[]     @relation("PlatformCommissionDefaultUpdatedBy")
+  categoryCommissionDefaultsUpdated     CategoryCommissionDefault[]     @relation("CategoryCommissionDefaultUpdatedBy")
+  enterpriseCategoryCommissionsUpdated  EnterpriseCategoryCommission[]  @relation("EnterpriseCategoryCommissionUpdatedBy")
+  deductionRulesCreated               DeductionRule[]                  @relation("DeductionRuleCreatedBy")
+  settlementDeductionsCreated          SettlementDeduction[]            @relation("SettlementDeductionCreatedBy")
 
   @@index([RoleLevel])
   @@map("ADMIN")
@@ -132,8 +140,10 @@ model FoodCategory {
   UpdatedAt    DateTime? @updatedAt
   AdminID      String  @db.VarChar(36)
 
-  foods Food[]
-  admin Admin @relation(fields: [AdminID], references: [AdminID], onDelete: Restrict)
+  foods                         Food[]
+  admin                         Admin                         @relation(fields: [AdminID], references: [AdminID], onDelete: Restrict)
+  commissionDefault             CategoryCommissionDefault?
+  enterpriseCategoryCommissions EnterpriseCategoryCommission[]
 
   @@index([AdminID])
   @@map("FOOD_CATEGORY")
@@ -235,6 +245,7 @@ model Order {
   EstimatedDeliveryTime     DateTime?
   Status                    OrderStatus @default(Pending)
   CommissionAmount          Decimal?    @db.Decimal(18, 2)
+  Metadata                  Json?
 
   customer      Customer    @relation(fields: [CustomerID], references: [CustomerID], onDelete: Restrict)
   voucher       Voucher?    @relation(fields: [VoucherID], references: [VoucherID], onDelete: SetNull)
@@ -253,11 +264,14 @@ model Order {
 }
 
 model OrderDetail {
-  OrderDetailID String  @id @default(uuid()) @db.VarChar(36)
-  OrderID       String  @db.VarChar(36)
-  FoodID        String  @db.VarChar(36)
-  SubTotal      Decimal @db.Decimal(18, 2)
-  Quantity      Int
+  OrderDetailID            String   @id @default(uuid()) @db.VarChar(36)
+  OrderID                  String   @db.VarChar(36)
+  FoodID                   String   @db.VarChar(36)
+  SubTotal                 Decimal  @db.Decimal(18, 2)
+  Quantity                 Int
+  AppliedCommissionPercent Decimal? @db.Decimal(5, 2)
+  CommissionLineAmount     Decimal? @db.Decimal(18, 2)
+  Metadata                 Json?
 
   order Order @relation(fields: [OrderID], references: [OrderID], onDelete: Cascade)
   food  Food  @relation(fields: [FoodID], references: [FoodID], onDelete: Cascade)
@@ -363,6 +377,7 @@ model Settlement {
 
   enterprise  Enterprise @relation(fields: [EnterpriseID], references: [EnterpriseID], onDelete: Restrict)
   items       SettlementItem[]
+  deductions  SettlementDeduction[]
 
   @@index([EnterpriseID])
   @@index([Status])
@@ -384,11 +399,130 @@ model SettlementItem {
   @@map("SETTLEMENT_ITEM")
 }
 
+model PlatformCommissionDefault {
+  DefaultID         String    @id @default("00000000-0000-0000-0000-000000000001") @db.VarChar(36)
+  CommissionPercent Decimal   @db.Decimal(5, 2)
+  UpdatedAt         DateTime? @updatedAt
+  UpdatedByAdminID  String?   @db.VarChar(36)
+
+  updatedBy Admin? @relation("PlatformCommissionDefaultUpdatedBy", fields: [UpdatedByAdminID], references: [AdminID], onDelete: SetNull)
+
+  @@index([UpdatedByAdminID])
+  @@map("PLATFORM_COMMISSION_DEFAULT")
+}
+
+model CategoryCommissionDefault {
+  FoodCategoryID      String    @id @db.VarChar(36)
+  CommissionPercent   Decimal   @db.Decimal(5, 2)
+  IsActive            Boolean   @default(true)
+  EffectiveFrom       DateTime  @default(now())
+  EffectiveTo         DateTime?
+  UpdatedAt           DateTime? @updatedAt
+  UpdatedByAdminID    String?   @db.VarChar(36)
+
+  foodCategory FoodCategory @relation(fields: [FoodCategoryID], references: [CategoryID], onDelete: Cascade)
+  updatedBy    Admin?       @relation("CategoryCommissionDefaultUpdatedBy", fields: [UpdatedByAdminID], references: [AdminID], onDelete: SetNull)
+
+  @@index([IsActive])
+  @@index([UpdatedByAdminID])
+  @@map("CATEGORY_COMMISSION_DEFAULT")
+}
+
+model EnterpriseCategoryCommission {
+  EnterpriseCategoryCommissionID String    @id @default(uuid()) @db.VarChar(36)
+  EnterpriseID                   String    @db.VarChar(36)
+  FoodCategoryID                 String    @db.VarChar(36)
+  CommissionPercent              Decimal   @db.Decimal(5, 2)
+  IsActive                       Boolean   @default(true)
+  EffectiveFrom                  DateTime  @default(now())
+  EffectiveTo                    DateTime?
+  UpdatedAt                      DateTime? @updatedAt
+  UpdatedByAdminID               String?   @db.VarChar(36)
+
+  enterprise   Enterprise   @relation(fields: [EnterpriseID], references: [EnterpriseID], onDelete: Cascade)
+  foodCategory FoodCategory @relation(fields: [FoodCategoryID], references: [CategoryID], onDelete: Restrict)
+  updatedBy    Admin?       @relation("EnterpriseCategoryCommissionUpdatedBy", fields: [UpdatedByAdminID], references: [AdminID], onDelete: SetNull)
+
+  @@unique([EnterpriseID, FoodCategoryID])
+  @@index([EnterpriseID])
+  @@index([FoodCategoryID])
+  @@index([UpdatedByAdminID])
+  @@map("ENTERPRISE_CATEGORY_COMMISSION")
+}
+
+model DeductionRule {
+  RuleID             String        @id @default(uuid()) @db.VarChar(36)
+  EnterpriseID       String?       @db.VarChar(36)
+  DeductionType      DeductionType
+  Label              String        @db.VarChar(255)
+  FixedAmount        Decimal?      @db.Decimal(18, 2)
+  PercentOfGross     Decimal?      @db.Decimal(5, 2)
+  IsActive           Boolean       @default(true)
+  ValidFrom          DateTime      @default(now())
+  ValidTo            DateTime?
+  CreatedAt          DateTime      @default(now())
+  UpdatedAt          DateTime?     @updatedAt
+  CreatedByAdminID   String?       @db.VarChar(36)
+
+  enterprise           Enterprise?            @relation(fields: [EnterpriseID], references: [EnterpriseID], onDelete: Cascade)
+  createdBy            Admin?                 @relation("DeductionRuleCreatedBy", fields: [CreatedByAdminID], references: [AdminID], onDelete: SetNull)
+  settlementDeductions SettlementDeduction[]
+
+  @@index([EnterpriseID])
+  @@index([IsActive])
+  @@index([DeductionType])
+  @@index([CreatedByAdminID])
+  @@map("DEDUCTION_RULE")
+}
+
+model SettlementDeduction {
+  DeductionID      String        @id @default(uuid()) @db.VarChar(36)
+  SettlementID     String        @db.VarChar(36)
+  Amount           Decimal       @db.Decimal(18, 2)
+  DeductionType    DeductionType
+  Reason           String?       @db.Text
+  ReferenceCode    String?       @db.VarChar(100)
+  DeductionRuleID  String?       @db.VarChar(36)
+  CreatedAt        DateTime      @default(now())
+  CreatedByAdminID String?       @db.VarChar(36)
+
+  settlement Settlement     @relation(fields: [SettlementID], references: [SettlementID], onDelete: Cascade)
+  rule       DeductionRule? @relation(fields: [DeductionRuleID], references: [RuleID], onDelete: SetNull)
+  createdBy  Admin?         @relation("SettlementDeductionCreatedBy", fields: [CreatedByAdminID], references: [AdminID], onDelete: SetNull)
+
+  @@index([SettlementID])
+  @@index([DeductionType])
+  @@index([DeductionRuleID])
+  @@index([CreatedByAdminID])
+  @@map("SETTLEMENT_DEDUCTION")
+}
+
+model AuditLog {
+  AuditLogID     String   @id @default(uuid()) @db.VarChar(36)
+  CreatedAt      DateTime @default(now())
+  ActorAccountID String?  @db.VarChar(36)
+  Action         String   @db.VarChar(120)
+  EntityType     String?  @db.VarChar(80)
+  EntityId       String?  @db.VarChar(36)
+  Summary        String   @db.VarChar(500)
+  Metadata       Json?
+  IpAddress      String?  @db.VarChar(45)
+  Success        Boolean  @default(true)
+
+  account Account? @relation(fields: [ActorAccountID], references: [AccountID], onDelete: SetNull)
+
+  @@index([CreatedAt])
+  @@index([ActorAccountID])
+  @@index([Action])
+  @@index([EntityType, EntityId])
+  @@map("AUDIT_LOG")
+}
+
 model Support {
   MessageID    String        @id @default(uuid()) @db.VarChar(36)
   AccountID    String        @db.VarChar(36)
   Subject      String        @db.VarChar(255)
-  Description  String?       @db.VarChar(255)
+  Description  String?       @db.Text
   SentAt       DateTime      @default(now())
   Status       SupportStatus @default(Pending)
   ReplyMessage String?       @db.Text
@@ -552,4 +686,14 @@ enum SupportStatus {
   InProgress
   Resolved
   Closed
+}
+
+enum DeductionType {
+  PlatformFee
+  Penalty
+  Tax
+  Adjustment
+  CODHandling
+  Marketing
+  Other
 }
