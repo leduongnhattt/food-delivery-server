@@ -10,7 +10,7 @@ import { AuthPasswordController } from '@modules/auth/password/password.controll
 import { AuthGoogleController } from '@modules/auth/google/google.controller';
 import { AuthPasswordService } from '@modules/auth/password/password.service';
 import { AuthGoogleService } from '@modules/auth/google/google.service';
-import { JwtAuthGuard } from '@common/guards';
+import { AdminRoleGuard, JwtAuthGuard } from '@common/guards';
 
 @Module({
   imports: [PrismaModule],
@@ -21,6 +21,7 @@ import { JwtAuthGuard } from '@common/guards';
     AuthEmailService,
     AuthRepository,
     JwtAuthGuard,
+    AdminRoleGuard,
   ],
   controllers: [
     AuthController,
@@ -35,6 +36,7 @@ import { JwtAuthGuard } from '@common/guards';
     AuthGoogleService,
     AuthRepository,
     JwtAuthGuard,
+    AdminRoleGuard,
   ],
 })
 export class AuthModule {}

@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common';
+import { AccountStatus } from '@prisma/client';
 import { AuthRepository } from '@infra/repositories/auth.repository';
+import { AuthPasswordService } from '@modules/auth/password/password.service';
 import type { Secret, SignOptions } from 'jsonwebtoken';
 import { sign as jwtSign, verify as jwtVerify } from 'jsonwebtoken';
 import { createHash, randomBytes } from 'crypto';
@@ -31,7 +33,10 @@ export class AuthService {
   private readonly refreshTokenTtlDays: number;
   private readonly jwtSecret: string;
 
-  constructor(private readonly authRepo: AuthRepository) {
+  constructor(
+    private readonly authRepo: AuthRepository,
+    private readonly authPassword: AuthPasswordService,
+  ) {
     this.accessTokenTtl = process.env.ACCESS_TOKEN_TTL ?? '15m';
     this.refreshTokenTtlDays = Number(
       process.env.REFRESH_TOKEN_TTL_DAYS ?? '7',
@@ -208,5 +213,48 @@ export class AuthService {
     const token =
       await this.authRepo.findValidAuthTokenByRefreshToken(refreshToken);
     return token?.AccountID ?? null;
+  }
+
+  /**
+   * Creates an account with Enterprise role and a linked Enterprise record (admin creates restaurant).
+   */
+  async createAccountForEnterprise(params: {
+    username: string;
+    email: string;
+    password: string;
+    enterpriseName: string;
+    address: string;
+    phoneNumber: string;
+    description?: string;
+    openHours: string;
+    closeHours: string;
+  }): Promise<{
+    account: Awaited<ReturnType<AuthRepository['createAccount']>>;
+    enterprise: Awaited<ReturnType<AuthRepository['createEnterprise']>>;
+  }> {
+    const enterpriseRole = await this.authRepo.findRoleByName('Enterprise');
+    if (!enterpriseRole) {
+      throw new Error('Enterprise role not found');
+    }
+    const passwordHash = await this.authPassword.hashPassword(params.password);
+    const account = await this.authRepo.createAccount({
+      Username: params.username,
+      Email: params.email,
+      PasswordHash: passwordHash,
+      RoleID: enterpriseRole.RoleID,
+      Avatar: '',
+      Status: AccountStatus.Active,
+      Provider: 'email',
+    });
+    const enterprise = await this.authRepo.createEnterprise({
+      AccountID: account.AccountID,
+      EnterpriseName: params.enterpriseName,
+      Address: params.address,
+      PhoneNumber: params.phoneNumber,
+      Description: params.description,
+      OpenHours: params.openHours,
+      CloseHours: params.closeHours,
+    });
+    return { account, enterprise };
   }
 }
