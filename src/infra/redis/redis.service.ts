@@ -47,6 +47,28 @@ export async function deleteKey(key: string): Promise<void> {
   await redisClient.del(key);
 }
 
+/**
+ * Deletes all keys matching a Redis glob pattern (e.g. `vouchers:approved:list:*`).
+ * Uses SCAN to avoid blocking the server on large keyspaces.
+ */
+export async function deleteKeysMatchingPattern(pattern: string): Promise<void> {
+  if (!redisClient) return;
+  let cursor = '0';
+  do {
+    const [next, keys] = await redisClient.scan(
+      cursor,
+      'MATCH',
+      pattern,
+      'COUNT',
+      100,
+    );
+    cursor = next;
+    if (keys.length > 0) {
+      await redisClient.del(...keys);
+    }
+  } while (cursor !== '0');
+}
+
 export async function expireKey(
   key: string,
   ttlSeconds: number,

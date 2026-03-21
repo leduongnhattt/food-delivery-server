@@ -82,9 +82,27 @@ export interface FoodsListResponse {
   };
 }
 
+export interface CreateFoodDto {
+  name: string;
+  description: string;
+  price: number | string;
+  image?: string | null;
+  category: string;
+  isAvailable?: boolean;
+  restaurantId: string;
+}
+
+export interface UpdateFoodDto {
+  name?: string;
+  description?: string;
+  price?: number | string;
+  image?: string | null;
+  isAvailable?: boolean;
+}
+
 @Injectable()
 export class FoodsService {
-  constructor(private readonly foodsRepository: FoodsRepository) {}
+  constructor(private readonly foodsRepository: FoodsRepository) { }
 
   async findMany(criteria: FoodsQueryDto): Promise<FoodsListResponse> {
     const where = this.foodsRepository.buildWhereFromCriteria(
@@ -172,9 +190,9 @@ export class FoodsService {
       },
       enterprise: row.enterprise
         ? {
-            EnterpriseID: row.enterprise.EnterpriseID,
-            EnterpriseName: row.enterprise.EnterpriseName,
-          }
+          EnterpriseID: row.enterprise.EnterpriseID,
+          EnterpriseName: row.enterprise.EnterpriseName,
+        }
         : null,
     }));
 

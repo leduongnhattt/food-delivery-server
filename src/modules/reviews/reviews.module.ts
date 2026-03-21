@@ -20,5 +20,6 @@ const reviewsUploadStorage: StorageEngine = memoryStorage();
   ],
   controllers: [ReviewsController],
   providers: [ReviewsRepository, ReviewsService],
+  exports: [ReviewsService],
 })
 export class ReviewsModule {}

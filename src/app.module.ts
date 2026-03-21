@@ -11,6 +11,10 @@ import { CartModule } from '@modules/cart/cart.module';
 import { CustomersModule } from '@modules/customers/customers.module';
 import { OrdersModule } from '@modules/orders/orders.module';
 import { PaymentsModule } from '@modules/payments/payments.module';
+import { VouchersModule } from '@modules/vouchers/vouchers.module';
+import { HealthModule } from '@modules/health/health.module';
+import { MenuItemsModule } from '@modules/menu-items/menu-items.module';
+import { AdminModule } from '@modules/admin/admin.module';
 
 @Module({
   imports: [
@@ -24,6 +28,10 @@ import { PaymentsModule } from '@modules/payments/payments.module';
     CustomersModule,
     OrdersModule,
     PaymentsModule,
+    VouchersModule,
+    HealthModule,
+    MenuItemsModule,
+    AdminModule,
   ],
   controllers: [AppController],
   providers: [AppService],
