@@ -1,8 +1,4 @@
-import {
-  BadRequestException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import {
   FoodsRepository,
   FoodListCriteria,
@@ -106,7 +102,7 @@ export interface UpdateFoodDto {
 
 @Injectable()
 export class FoodsService {
-  constructor(private readonly foodsRepository: FoodsRepository) {}
+  constructor(private readonly foodsRepository: FoodsRepository) { }
 
   async findMany(criteria: FoodsQueryDto): Promise<FoodsListResponse> {
     const where = this.foodsRepository.buildWhereFromCriteria(
@@ -194,9 +190,9 @@ export class FoodsService {
       },
       enterprise: row.enterprise
         ? {
-            EnterpriseID: row.enterprise.EnterpriseID,
-            EnterpriseName: row.enterprise.EnterpriseName,
-          }
+          EnterpriseID: row.enterprise.EnterpriseID,
+          EnterpriseName: row.enterprise.EnterpriseName,
+        }
         : null,
     }));
 
@@ -233,117 +229,6 @@ export class FoodsService {
     }));
 
     return { foods: items };
-  }
-
-  async getByIdDetailed(foodId: string) {
-    const row = await this.foodsRepository.findByIdDetailed(foodId);
-    if (!row) {
-      throw new NotFoundException('Menu item not found');
-    }
-    return row;
-  }
-
-  async createFoodFromMenuItemDto(dto: CreateFoodDto) {
-    const name = (dto?.name ?? '').trim();
-    const description = (dto?.description ?? '').trim();
-    const category = (dto?.category ?? '').trim();
-    const restaurantId = (dto?.restaurantId ?? '').trim();
-    const isAvailable = dto?.isAvailable ?? true;
-
-    const priceNum =
-      typeof dto?.price === 'string' ? parseFloat(dto.price) : dto?.price;
-
-    if (!name || !description || !category || !restaurantId) {
-      throw new BadRequestException(
-        'Name, description, price, category, and restaurantId are required',
-      );
-    }
-    if (priceNum == null || Number.isNaN(priceNum)) {
-      throw new BadRequestException('Invalid price');
-    }
-
-    const restaurant = await this.foodsRepository.findEnterpriseById(
-      restaurantId,
-    );
-    if (!restaurant) {
-      throw new NotFoundException('Restaurant not found');
-    }
-
-    const categoryRow = await this.foodsRepository.findFoodCategoryByName(
-      category,
-    );
-    if (!categoryRow) {
-      throw new BadRequestException('Food category not found');
-    }
-
-    const created = await this.foodsRepository.createFood({
-      DishName: name,
-      Description: description,
-      Price: priceNum,
-      ImageURL: dto?.image ?? null,
-      FoodCategoryID: categoryRow.CategoryID,
-      EnterpriseID: restaurantId,
-      IsAvailable: Boolean(isAvailable),
-    });
-
-    const firstMenu = await this.foodsRepository.findFirstMenuForEnterprise(
-      restaurantId,
-    );
-    if (firstMenu?.MenuID) {
-      await this.foodsRepository.linkFoodToMenuIfNotLinked(
-        created.FoodID,
-        firstMenu.MenuID,
-      );
-      // Re-fetch to include the newly linked menuFoods.
-      return this.foodsRepository.findByIdDetailed(created.FoodID);
-    }
-
-    return created;
-  }
-
-  async updateFoodById(foodId: string, dto: UpdateFoodDto) {
-    if (!foodId) {
-      throw new BadRequestException('Missing id');
-    }
-    const data: {
-      DishName?: string;
-      Description?: string;
-      Price?: number;
-      ImageURL?: string | null;
-      IsAvailable?: boolean;
-    } = {};
-
-    if (dto?.name != null) data.DishName = dto.name;
-    if (dto?.description != null) data.Description = dto.description;
-    if (dto?.image !== undefined) data.ImageURL = dto.image;
-    if (typeof dto?.isAvailable === 'boolean') data.IsAvailable = dto.isAvailable;
-    if (dto?.price !== undefined) {
-      const priceNum =
-        typeof dto.price === 'string' ? parseFloat(dto.price) : dto.price;
-      if (priceNum == null || Number.isNaN(priceNum)) {
-        throw new BadRequestException('Invalid price');
-      }
-      data.Price = priceNum;
-    }
-
-    try {
-      return await this.foodsRepository.updateFood(foodId, data);
-    } catch (e) {
-      // Prisma throws if record missing; translate to 404 for client.
-      throw new NotFoundException('Menu item not found');
-    }
-  }
-
-  async deleteFoodById(foodId: string) {
-    if (!foodId) {
-      throw new BadRequestException('Missing id');
-    }
-    try {
-      await this.foodsRepository.deleteFood(foodId);
-      return { message: 'Menu item deleted successfully' as const };
-    } catch {
-      throw new NotFoundException('Menu item not found');
-    }
   }
 
   private mapRowToFoodListItem(row: {
