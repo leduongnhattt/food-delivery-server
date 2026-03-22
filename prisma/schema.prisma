@@ -104,6 +104,8 @@ model Enterprise {
   settlements                  Settlement[]
   enterpriseCategoryCommissions EnterpriseCategoryCommission[]
   deductionRules               DeductionRule[]
+  payoutDestinations           EnterprisePayoutDestination[]
+  payoutSettings               EnterprisePayoutSettings?
 
   @@index([AccountID])
   @@index([EnterpriseName])
@@ -696,4 +698,62 @@ enum DeductionType {
   CODHandling
   Marketing
   Other
+}
+
+enum PayoutDestinationKind {
+  BankAccount
+  EWallet
+}
+
+enum PayoutFrequency {
+  Monthly
+  Quarterly
+  Yearly
+}
+
+model EnterprisePayoutDestination {
+  PayoutDestinationID String                @id @default(uuid()) @db.VarChar(36)
+  EnterpriseID        String                @db.VarChar(36)
+  Kind                PayoutDestinationKind
+  Label               String?               @db.VarChar(100)
+  IsDefault           Boolean               @default(false)
+  IsActive            Boolean               @default(true)
+  VerifiedAt          DateTime?
+  CreatedAt           DateTime              @default(now())
+  UpdatedAt           DateTime?             @updatedAt
+
+  BankName          String? @db.VarChar(120)
+  BankCode          String? @db.VarChar(32)
+  AccountHolderName String? @db.VarChar(120)
+  AccountNumber     String? @db.VarChar(34)
+  BranchName        String? @db.VarChar(120)
+  CountryCode       String? @db.VarChar(2)
+
+  ProviderCode    String? @db.VarChar(50)
+  WalletRef       String? @db.VarChar(120)
+  WalletDisplayName String? @db.VarChar(120)
+
+  DetailMetadata Json?
+
+  enterprise           Enterprise               @relation(fields: [EnterpriseID], references: [EnterpriseID], onDelete: Cascade)
+  preferredForSettings EnterprisePayoutSettings? @relation("EnterprisePreferredPayout")
+
+  @@index([EnterpriseID])
+  @@index([EnterpriseID, IsActive])
+  @@index([Kind])
+  @@index([ProviderCode])
+  @@map("ENTERPRISE_PAYOUT_DESTINATION")
+}
+
+model EnterprisePayoutSettings {
+  EnterpriseID                 String          @id @db.VarChar(36)
+  PayoutFrequency              PayoutFrequency @default(Monthly)
+  PreferredPayoutDestinationID String?         @unique @db.VarChar(36)
+  EffectiveFrom                DateTime        @default(now())
+  UpdatedAt                    DateTime?       @updatedAt
+
+  enterprise           Enterprise                 @relation(fields: [EnterpriseID], references: [EnterpriseID], onDelete: Cascade)
+  preferredDestination EnterprisePayoutDestination? @relation("EnterprisePreferredPayout", fields: [PreferredPayoutDestinationID], references: [PayoutDestinationID], onDelete: SetNull)
+
+  @@map("ENTERPRISE_PAYOUT_SETTINGS")
 }
