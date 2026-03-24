@@ -84,6 +84,8 @@ model Enterprise {
   AccountID       String   @unique @db.VarChar(36)
   EnterpriseName  String   @db.VarChar(100)
   Address         String   @db.VarChar(255)
+  Latitude        Decimal? @db.Decimal(10, 7)
+  Longitude       Decimal? @db.Decimal(10, 7)
   Description     String?  @db.VarChar(255)
   PhoneNumber     String   @unique @db.VarChar(15)
   OpenHours       String   @db.VarChar(10)
@@ -109,6 +111,7 @@ model Enterprise {
 
   @@index([AccountID])
   @@index([EnterpriseName])
+  @@index([Latitude, Longitude])
   @@index([DeletedAt])
   @@fulltext([EnterpriseName, Description])
   @@map("ENTERPRISE")
@@ -245,6 +248,7 @@ model Order {
   DeliveryAddress           String      @db.Text
   DeliveryNote              String?     @db.Text
   EstimatedDeliveryTime     DateTime?
+  DeliveredAt               DateTime?
   Status                    OrderStatus @default(Pending)
   CommissionAmount          Decimal?    @db.Decimal(18, 2)
   Metadata                  Json?
@@ -258,6 +262,7 @@ model Order {
   @@index([VoucherID])
   @@index([Status])
   @@index([OrderDate])
+  @@index([DeliveredAt])
   @@index([TotalAmount])
   @@index([CustomerID, Status])
   @@index([Status, OrderDate])

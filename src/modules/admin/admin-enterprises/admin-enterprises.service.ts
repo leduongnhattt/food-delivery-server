@@ -18,6 +18,8 @@ export interface CreateEnterpriseBody {
   enterpriseName: string;
   phoneNumber: string;
   address: string;
+  latitude: number;
+  longitude: number;
   openHours: string;
   closeHours: string;
   description?: string;
@@ -94,6 +96,8 @@ export class AdminEnterprisesService {
       enterpriseName,
       phoneNumber,
       address,
+      latitude,
+      longitude,
       openHours,
       closeHours,
     } = body;
@@ -104,10 +108,18 @@ export class AdminEnterprisesService {
       !enterpriseName?.trim() ||
       !phoneNumber?.trim() ||
       !address?.trim() ||
+      !Number.isFinite(latitude) ||
+      !Number.isFinite(longitude) ||
       !openHours?.trim() ||
       !closeHours?.trim()
     ) {
       throw new BadRequestException('Missing required fields');
+    }
+    if (latitude < -90 || latitude > 90) {
+      throw new BadRequestException('Latitude is out of range');
+    }
+    if (longitude < -180 || longitude > 180) {
+      throw new BadRequestException('Longitude is out of range');
     }
   }
 
@@ -120,6 +132,8 @@ export class AdminEnterprisesService {
         password: body.password,
         enterpriseName: body.enterpriseName.trim(),
         address: body.address.trim(),
+        latitude: body.latitude,
+        longitude: body.longitude,
         phoneNumber: body.phoneNumber.trim(),
         description: body.description?.trim(),
         openHours: body.openHours.trim(),
