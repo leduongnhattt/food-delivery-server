@@ -35,6 +35,10 @@ export class PaymentsService {
         return this.checkoutSuccess.processCheckoutSuccess(params);
     }
 
+    async getStripeSessionStatus(params: { accountId: string; sessionId: string }) {
+        return this.checkoutSuccess.getStripeSessionStatus(params);
+    }
+
     /**
      * Store cart snapshot for debugging/observability (logs only).
      * Mirrors legacy Next.js store-cart-data route.

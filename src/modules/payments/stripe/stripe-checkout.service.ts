@@ -61,6 +61,14 @@ export class StripeCheckoutService {
             throw new BadRequestException('Cart is empty');
         }
 
+        const customer = await this.prisma.customer.findFirst({
+            where: { AccountID: accountId },
+            select: { CustomerID: true },
+        });
+        if (!customer) {
+            throw new BadRequestException('Customer not found');
+        }
+
         const customerEmail = await this.getAccountEmail(accountId);
         const lineItems = this.buildLineItems(cartItems, currency);
         const computedCommissionFee = await this.addCommissionLineItem(
@@ -76,6 +84,40 @@ export class StripeCheckoutService {
             currency,
         );
 
+        // Create Order + Payment(Pending) BEFORE redirecting to Stripe.
+        // This prevents "missed payment" when the user never returns from Stripe.
+        const created = await this.prisma.$transaction(async (tx) => {
+            const order = await tx.order.create({
+                data: {
+                    CustomerID: customer.CustomerID,
+                    TotalAmount: 0, // finalized from Stripe amount_total after payment
+                    DeliveryAddress: deliveryInfo?.address || '',
+                    DeliveryNote: '',
+                    Status: 'Pending',
+                    orderDetails: {
+                        create: cartItems.map((item) => ({
+                            FoodID: item.menuItem.id,
+                            Quantity: item.quantity,
+                            SubTotal: item.menuItem.price * item.quantity,
+                        })),
+                    },
+                },
+            });
+
+            const payment = await tx.payment.create({
+                data: {
+                    OrderID: order.OrderID,
+                    PaymentMethod: 'CreditCard',
+                    PaymentStatus: 'Pending',
+                    TransactionData: {
+                        provider: 'STRIPE',
+                    },
+                },
+            });
+
+            return { order, payment };
+        });
+
         const session = await this.stripe.checkout.sessions.create({
             mode: 'payment',
             payment_method_types: ['card'],
@@ -83,8 +125,17 @@ export class StripeCheckoutService {
             success_url: successUrl,
             cancel_url: cancelUrl,
             discounts,
+            payment_intent_data: {
+                metadata: {
+                    orderId: created.order.OrderID,
+                    paymentId: created.payment.PaymentID,
+                    accountId,
+                },
+            },
             metadata: {
                 accountId,
+                orderId: created.order.OrderID,
+                paymentId: created.payment.PaymentID,
                 itemCount: cartItems.length.toString(),
                 total: total.toString(),
                 phone: deliveryInfo?.phone || '',
@@ -98,6 +149,16 @@ export class StripeCheckoutService {
         if (!session.url || !session.id) {
             throw new BadRequestException('Failed to create checkout session');
         }
+
+        await this.prisma.payment.update({
+            where: { PaymentID: created.payment.PaymentID },
+            data: {
+                TransactionData: {
+                    ...(created.payment.TransactionData as object),
+                    session_id: session.id,
+                },
+            },
+        });
 
         return { url: session.url, sessionId: session.id };
     }

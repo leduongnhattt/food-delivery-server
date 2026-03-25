@@ -17,7 +17,7 @@ type CartItemWithFood = Prisma.CartItemGetPayload<{
 }>;
 
 /** Time window to detect duplicate order (same customer, amount, status). */
-const DUPLICATE_ORDER_WINDOW_MS = 5 * 60 * 1000;
+// const DUPLICATE_ORDER_WINDOW_MS = 5 * 60 * 1000;
 
 /**
  * Orchestrates Stripe "checkout success": validates session, creates order and payment,
@@ -49,8 +49,13 @@ export class CheckoutSuccessService {
         }
 
         const metadata = session.metadata || {};
+        const orderId = (metadata.orderId as string) || '';
+        const paymentId = (metadata.paymentId as string) || '';
         const phone = (metadata.phone as string) || '';
         const address = (metadata.address as string) || '';
+        if (!orderId || !paymentId) {
+            throw new BadRequestException('Missing order/payment metadata');
+        }
 
         const customer = await this.prisma.customer.findFirst({
             where: { AccountID: accountId },
@@ -66,36 +71,69 @@ export class CheckoutSuccessService {
             throw new NotFoundException('Customer not found');
         }
 
-        let cartItems = await this.loadCartItemsByCustomer(accountId);
-        if (!cartItems || cartItems.length === 0) {
-            cartItems = await this.loadCartItemsByResolvedCart(accountId);
+        const order = await this.prisma.order.findUnique({
+            where: { OrderID: orderId },
+            select: { OrderID: true, CustomerID: true, Status: true },
+        });
+        if (!order || order.CustomerID !== customer.CustomerID) {
+            throw new NotFoundException('Order not found');
         }
-        if (!cartItems || cartItems.length === 0) {
-            throw new BadRequestException('No cart items found');
+
+        const payment = await this.prisma.payment.findUnique({
+            where: { PaymentID: paymentId },
+            select: {
+                PaymentID: true,
+                OrderID: true,
+                PaymentStatus: true,
+                TransactionData: true,
+            },
+        });
+        if (!payment || payment.OrderID !== order.OrderID) {
+            throw new NotFoundException('Payment not found');
         }
 
-        this.validateCartItems(cartItems);
+        if (payment.PaymentStatus !== 'Completed') {
+            const amountTotal = typeof session.amount_total === 'number' ? session.amount_total : null;
+            await this.prisma.$transaction(async (tx) => {
+                await tx.payment.update({
+                    where: { PaymentID: payment.PaymentID },
+                    data: {
+                        PaymentStatus: 'Completed',
+                        TransactionID: (session.payment_intent as string) || undefined,
+                        TransactionData: {
+                            ...(payment.TransactionData as object),
+                            provider: 'STRIPE',
+                            session_id: sessionId,
+                            payment_intent:
+                                typeof session.payment_intent === 'string'
+                                    ? session.payment_intent
+                                    : undefined,
+                            amount_total: amountTotal ?? undefined,
+                            currency: session.currency ?? undefined,
+                            customer_email:
+                                typeof session.customer_email === 'string'
+                                    ? session.customer_email
+                                    : undefined,
+                            metadata,
+                        },
+                    },
+                });
 
-        const deliveryInfo = { phone, address };
-        const subtotal = cartItems.reduce(
-            (sum: number, item: CartItemWithFood) => sum + Number(item.food.Price) * item.Quantity,
-            0,
-        );
-
-        const order = await this.findOrCreateOrder(
-            customer.CustomerID,
-            deliveryInfo,
-            customer.Address ?? '',
-            cartItems,
-            subtotal,
-        );
-
-        await this.ensurePaymentRecord(
-            session.payment_intent as string,
-            sessionId,
-            order.OrderID,
-            session,
-        );
+                if (order.Status === 'Pending') {
+                    await tx.order.update({
+                        where: { OrderID: order.OrderID },
+                        data: {
+                            Status: 'Confirmed',
+                            DeliveryAddress: address || undefined,
+                            TotalAmount:
+                                amountTotal !== null
+                                    ? amountTotal / 100
+                                    : undefined,
+                        },
+                    });
+                }
+            });
+        }
 
         await this.commissionSettlement.applyCommissionAndSettlement(order.OrderID);
 
@@ -105,6 +143,64 @@ export class CheckoutSuccessService {
             orderId: order.OrderID,
             success: true,
             cartCleared: true,
+        };
+    }
+
+    async getStripeSessionStatus(params: {
+        accountId: string;
+        sessionId: string;
+    }): Promise<{
+        sessionId: string;
+        stripePaymentStatus: string;
+        orderId: string;
+        orderStatus: string;
+        paymentId: string;
+        paymentStatus: string;
+    }> {
+        const { accountId, sessionId } = params;
+        if (!sessionId) {
+            throw new BadRequestException('Session ID is required');
+        }
+
+        const session = await this.stripeCheckout.retrieveSession(sessionId);
+        const metadata = session.metadata || {};
+        const orderId = (metadata.orderId as string) || '';
+        const paymentId = (metadata.paymentId as string) || '';
+        if (!orderId || !paymentId) {
+            throw new BadRequestException('Missing order/payment metadata');
+        }
+
+        const customer = await this.prisma.customer.findFirst({
+            where: { AccountID: accountId },
+            select: { CustomerID: true },
+        });
+        if (!customer) {
+            throw new NotFoundException('Customer not found');
+        }
+
+        const order = await this.prisma.order.findUnique({
+            where: { OrderID: orderId },
+            select: { OrderID: true, CustomerID: true, Status: true },
+        });
+        if (!order || order.CustomerID !== customer.CustomerID) {
+            throw new NotFoundException('Order not found');
+        }
+
+        const payment = await this.prisma.payment.findUnique({
+            where: { PaymentID: paymentId },
+            select: { PaymentID: true, OrderID: true, PaymentStatus: true },
+        });
+        if (!payment || payment.OrderID !== order.OrderID) {
+            throw new NotFoundException('Payment not found');
+        }
+
+        return {
+            sessionId,
+            stripePaymentStatus: session.payment_status,
+            orderId: order.OrderID,
+            orderStatus: String(order.Status),
+            paymentId: payment.PaymentID,
+            paymentStatus: String(payment.PaymentStatus),
         };
     }
 
@@ -162,76 +258,7 @@ export class CheckoutSuccessService {
         }
     }
 
-    private async findOrCreateOrder(
-        customerId: string,
-        deliveryInfo: { phone: string; address: string },
-        customerAddress: string,
-        cartItems: CartItemWithFood[],
-        subtotal: number,
-    ) {
-        const since = new Date(Date.now() - DUPLICATE_ORDER_WINDOW_MS);
-        const existingOrder = await this.prisma.order.findFirst({
-            where: {
-                CustomerID: customerId,
-                TotalAmount: subtotal,
-                Status: 'Confirmed',
-                OrderDate: { gte: since },
-            },
-        });
-
-        if (existingOrder) {
-            return existingOrder;
-        }
-
-        return this.prisma.order.create({
-            data: {
-                CustomerID: customerId,
-                TotalAmount: subtotal,
-                DeliveryAddress: deliveryInfo?.address || customerAddress,
-                DeliveryNote: '',
-                Status: 'Confirmed',
-                orderDetails: {
-                    create: cartItems.map((item: CartItemWithFood) => ({
-                        FoodID: item.FoodID,
-                        Quantity: item.Quantity,
-                        SubTotal: Number(item.food.Price) * item.Quantity,
-                    })),
-                },
-            },
-        });
-    }
-
-    private async ensurePaymentRecord(
-        paymentId: string,
-        sessionId: string,
-        orderId: string,
-        session: Stripe.Checkout.Session,
-    ): Promise<void> {
-        const existing = await this.prisma.payment.findFirst({
-            where: { PaymentID: paymentId },
-        });
-        if (existing) return;
-
-        await this.prisma.payment.create({
-            data: {
-                PaymentID: paymentId,
-                OrderID: orderId,
-                PaymentMethod: 'CreditCard',
-                TransactionID: paymentId,
-                PaymentStatus: 'Completed',
-                TransactionData: {
-                    session_id: sessionId,
-                    payment_intent: paymentId,
-                    amount_total: session.amount_total ?? undefined,
-                    currency: session.currency ?? undefined,
-                    customer_email:
-                        typeof session.customer_email === 'string'
-                            ? session.customer_email
-                            : undefined,
-                },
-            },
-        });
-    }
+    // Legacy helpers remain for future use, but Stripe success no longer creates orders/payments.
 
     private async clearCartForAccount(accountId: string): Promise<void> {
         await this.prisma.cartItem.deleteMany({
