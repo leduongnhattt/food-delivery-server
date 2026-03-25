@@ -9,7 +9,6 @@ import { CartService } from '@modules/cart/cart.service';
 import { CommissionSettlementService } from '@modules/payments/commission-settlement/commission-settlement.service';
 import { StripeCheckoutService } from '@modules/payments/stripe/stripe-checkout.service';
 import { ITEM_ORDER_VALUE_LIMIT } from '@shared/constants/order-limit';
-import type Stripe from 'stripe';
 
 /** Cart item with food and enterprise (from Prisma findMany include). */
 type CartItemWithFood = Prisma.CartItemGetPayload<{
@@ -51,7 +50,6 @@ export class CheckoutSuccessService {
         const metadata = session.metadata || {};
         const orderId = (metadata.orderId as string) || '';
         const paymentId = (metadata.paymentId as string) || '';
-        const phone = (metadata.phone as string) || '';
         const address = (metadata.address as string) || '';
         if (!orderId || !paymentId) {
             throw new BadRequestException('Missing order/payment metadata');
