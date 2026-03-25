@@ -1,7 +1,9 @@
 import {
     Body,
     Controller,
+    Get,
     Post,
+    Query,
     Req,
     UnauthorizedException,
 } from '@nestjs/common';
@@ -71,5 +73,26 @@ export class PaymentsController {
     ) {
         // No auth required in legacy implementation; keep behavior for parity.
         return this.paymentsService.storeCartData(body);
+    }
+
+    @Get('stripe/session-status')
+    async getStripeSessionStatus(
+        @Req() req: Request,
+        @Query('sessionId') sessionId: string,
+    ) {
+        const authHeader = req.headers['authorization'];
+        const token = authHeader?.replace(/^Bearer\s+/i, '');
+        if (!token) {
+            throw new UnauthorizedException('Unauthorized');
+        }
+        const decoded = this.authService.verifyAccessToken(token);
+        if (!decoded?.accountId) {
+            throw new UnauthorizedException('Invalid or expired token');
+        }
+
+        return this.paymentsService.getStripeSessionStatus({
+            accountId: decoded.accountId,
+            sessionId,
+        });
     }
 }

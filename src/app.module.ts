@@ -15,6 +15,7 @@ import { VouchersModule } from '@modules/vouchers/vouchers.module';
 import { HealthModule } from '@modules/health/health.module';
 import { MenuItemsModule } from '@modules/menu-items/menu-items.module';
 import { AdminModule } from '@modules/admin/admin.module';
+import { WebhooksModule } from '@modules/webhooks/webhooks.module';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { AdminModule } from '@modules/admin/admin.module';
     HealthModule,
     MenuItemsModule,
     AdminModule,
+    WebhooksModule,
   ],
   controllers: [AppController],
   providers: [AppService],
