@@ -296,6 +296,8 @@ export class AuthRepository {
     AccountID: string;
     EnterpriseName: string;
     Address: string;
+    Latitude: number;
+    Longitude: number;
     PhoneNumber: string;
     Description?: string | null;
     OpenHours: string;
@@ -306,6 +308,8 @@ export class AuthRepository {
         AccountID: data.AccountID,
         EnterpriseName: data.EnterpriseName,
         Address: data.Address,
+        Latitude: data.Latitude,
+        Longitude: data.Longitude,
         PhoneNumber: data.PhoneNumber,
         Description: data.Description ?? null,
         OpenHours: data.OpenHours,
@@ -316,6 +320,8 @@ export class AuthRepository {
         EnterpriseID: true,
         EnterpriseName: true,
         Address: true,
+        Latitude: true,
+        Longitude: true,
         PhoneNumber: true,
         Description: true,
         OpenHours: true,

@@ -224,6 +224,8 @@ export class AuthService {
     password: string;
     enterpriseName: string;
     address: string;
+    latitude: number;
+    longitude: number;
     phoneNumber: string;
     description?: string;
     openHours: string;
@@ -250,6 +252,8 @@ export class AuthService {
       AccountID: account.AccountID,
       EnterpriseName: params.enterpriseName,
       Address: params.address,
+      Latitude: params.latitude,
+      Longitude: params.longitude,
       PhoneNumber: params.phoneNumber,
       Description: params.description,
       OpenHours: params.openHours,
