@@ -104,7 +104,6 @@ model Enterprise {
   carts     Cart[]
   foods     Food[]
   settlements                  Settlement[]
-  enterpriseCategoryCommissions EnterpriseCategoryCommission[]
   deductionRules               DeductionRule[]
   payoutDestinations           EnterprisePayoutDestination[]
   payoutSettings               EnterprisePayoutSettings?
@@ -129,7 +128,6 @@ model Admin {
   foodCategories FoodCategory[]
   platformCommissionDefaultsUpdated     PlatformCommissionDefault[]     @relation("PlatformCommissionDefaultUpdatedBy")
   categoryCommissionDefaultsUpdated     CategoryCommissionDefault[]     @relation("CategoryCommissionDefaultUpdatedBy")
-  enterpriseCategoryCommissionsUpdated  EnterpriseCategoryCommission[]  @relation("EnterpriseCategoryCommissionUpdatedBy")
   deductionRulesCreated               DeductionRule[]                  @relation("DeductionRuleCreatedBy")
   settlementDeductionsCreated          SettlementDeduction[]            @relation("SettlementDeductionCreatedBy")
 
@@ -147,8 +145,7 @@ model FoodCategory {
 
   foods                         Food[]
   admin                         Admin                         @relation(fields: [AdminID], references: [AdminID], onDelete: Restrict)
-  commissionDefault             CategoryCommissionDefault?
-  enterpriseCategoryCommissions EnterpriseCategoryCommission[]
+  commissionDefaults            CategoryCommissionDefault[]
 
   @@index([AdminID])
   @@map("FOOD_CATEGORY")
@@ -419,7 +416,8 @@ model PlatformCommissionDefault {
 }
 
 model CategoryCommissionDefault {
-  FoodCategoryID      String    @id @db.VarChar(36)
+  CommissionDefaultID String    @id @default(uuid()) @db.VarChar(36)
+  FoodCategoryID      String    @db.VarChar(36)
   CommissionPercent   Decimal   @db.Decimal(5, 2)
   IsActive            Boolean   @default(true)
   EffectiveFrom       DateTime  @default(now())
@@ -430,31 +428,12 @@ model CategoryCommissionDefault {
   foodCategory FoodCategory @relation(fields: [FoodCategoryID], references: [CategoryID], onDelete: Cascade)
   updatedBy    Admin?       @relation("CategoryCommissionDefaultUpdatedBy", fields: [UpdatedByAdminID], references: [AdminID], onDelete: SetNull)
 
+  @@unique([FoodCategoryID, EffectiveFrom])
+  @@index([FoodCategoryID])
   @@index([IsActive])
+  @@index([EffectiveFrom, EffectiveTo])
   @@index([UpdatedByAdminID])
   @@map("CATEGORY_COMMISSION_DEFAULT")
-}
-
-model EnterpriseCategoryCommission {
-  EnterpriseCategoryCommissionID String    @id @default(uuid()) @db.VarChar(36)
-  EnterpriseID                   String    @db.VarChar(36)
-  FoodCategoryID                 String    @db.VarChar(36)
-  CommissionPercent              Decimal   @db.Decimal(5, 2)
-  IsActive                       Boolean   @default(true)
-  EffectiveFrom                  DateTime  @default(now())
-  EffectiveTo                    DateTime?
-  UpdatedAt                      DateTime? @updatedAt
-  UpdatedByAdminID               String?   @db.VarChar(36)
-
-  enterprise   Enterprise   @relation(fields: [EnterpriseID], references: [EnterpriseID], onDelete: Cascade)
-  foodCategory FoodCategory @relation(fields: [FoodCategoryID], references: [CategoryID], onDelete: Restrict)
-  updatedBy    Admin?       @relation("EnterpriseCategoryCommissionUpdatedBy", fields: [UpdatedByAdminID], references: [AdminID], onDelete: SetNull)
-
-  @@unique([EnterpriseID, FoodCategoryID])
-  @@index([EnterpriseID])
-  @@index([FoodCategoryID])
-  @@index([UpdatedByAdminID])
-  @@map("ENTERPRISE_CATEGORY_COMMISSION")
 }
 
 model DeductionRule {
