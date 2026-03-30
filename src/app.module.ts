@@ -17,6 +17,7 @@ import { MenuItemsModule } from '@modules/menu-items/menu-items.module';
 import { AdminModule } from '@modules/admin/admin.module';
 import { WebhooksModule } from '@modules/webhooks/webhooks.module';
 import { CategoriesModule } from '@modules/categories/categories.module';
+import { EnterpriseModule } from '@modules/enterprise/enterprise.module';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { CategoriesModule } from '@modules/categories/categories.module';
     AdminModule,
     WebhooksModule,
     CategoriesModule,
+    EnterpriseModule,
   ],
   controllers: [AppController],
   providers: [AppService],
