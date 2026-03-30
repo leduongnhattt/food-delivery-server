@@ -1,98 +1,125 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+## Food Delivery Server
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+Backend API for the **Food Delivery** system (food ordering app). This service provides APIs for:
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+- **Authentication & authorization** (JWT, Google sign-in)
+- **Foods / restaurants / menus**
+- **Cart & orders**
+- **Payments** (Stripe Checkout + webhooks)
+- **Media uploads** (Cloudinary)
+- **Health AI feature** (Gemini-based health profile analysis)
 
-## Description
+Primary goal: centralize “food ordering” domain logic into a single backend that is easy to extend and integrate with the frontend.
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+## Demo / Screenshot
 
-## Project setup
+- Not available yet (add screenshots here if you have them).
 
-```bash
-$ npm install
-```
+## Tech stack
 
-## Compile and run the project
+- **Backend**: NestJS (TypeScript), Prisma ORM
+- **Frontend**: see `food-delivery-app` (same repository)
+- **Database**: MySQL
+- **Other**: Redis (optional cache/session), Stripe, Cloudinary, Nodemailer, Google OAuth, Gemini API
 
-```bash
-# development
-$ npm run start
+## Key features
 
-# watch mode
-$ npm run start:dev
+- **Auth**: login/register, refresh token, Google OAuth
+- **Foods / Restaurants / Menu items**: CRUD + search/filter
+- **Cart**: user/guest cart
+- **Orders**: place orders, track status
+- **Payments**: create Stripe checkout, handle callbacks/webhooks
+- **Vouchers**: discount codes
+- **Reviews**: food/restaurant reviews
+- **Admin**: administration modules (depending on enabled modules)
+- **Health (AI)**: health profile analysis (Gemini)
 
-# production mode
-$ npm run start:prod
-```
+## Quick start
 
-## Run tests
+### Clone repo
 
 ```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
+git clone <your-repo-url>
+cd food-delivery-server
 ```
 
-## Deployment
-
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
-
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+### Install dependencies
 
 ```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
+npm install
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+### Environment setup
 
-## Resources
+1) Create a local `.env` from the template:
 
-Check out a few resources that may come in handy when working with NestJS:
+```bash
+copy .env.example .env
+```
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+2) Update values in `.env` for your environment (DB, JWT secret, Stripe, etc.).
 
-## Support
+### Run project (dev)
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+```bash
+npm run db:generate
+npm run db:migrate
+npm run start:dev
+```
 
-## Stay in touch
+The API uses a global `/api` prefix (default `http://localhost:3001/api`).
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+## Directory structure (brief)
+
+```text
+food-delivery-server/
+  prisma/                 Prisma schema + migrations
+  src/
+    common/               shared guards, filters, interceptors
+    config/               configuration (app/db...)
+    infra/                infrastructure integrations (Prisma, Redis, Stripe, Cloudinary, repositories)
+    modules/              business modules (auth, foods, orders, payments, ...)
+    shared/               shared utilities
+    main.ts               entrypoint, CORS, global prefix (/api)
+```
+
+## Environment variables
+
+This project reads `.env` from the project root (it is loaded even when running from `dist/`). See `.env.example`.
+
+- **Database**
+  - `DATABASE_URL`: MySQL connection string (Prisma)
+- **Server**
+  - `PORT`: port API (default `3001`)
+  - `CORS_ORIGIN`: comma-separated origins (optional)
+- **Auth**
+  - `JWT_SECRET`: JWT signing secret (**recommended >= 32 chars**)
+  - `ACCESS_TOKEN_TTL`: e.g. `15m`
+  - `REFRESH_TOKEN_TTL_DAYS`: e.g. `7`
+- **SMTP (password reset / email)**
+  - `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `APP_NAME`
+- **Google OAuth**
+  - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
+  - `API_URL`: server public URL for redirect/callback configuration (optional)
+  - `FRONTEND_ORIGIN`: frontend URL used for callback/postMessage (optional)
+- **Cloudinary (uploads)**
+  - `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`
+  - `CLOUDINARY_UPLOAD_FOLDER` (optional)
+- **Redis (optional)**
+  - `REDIS_URL`
+- **Stripe**
+  - `STRIPE_SECRET_KEY`
+  - `STRIPE_WEBHOOK_SECRET`
+  - `APP_URL`: frontend base URL for checkout success/cancel redirects
+- **Gemini (Health AI)**
+  - `GEMINI_API_KEY`
+
+> Note: **Do not commit** `.env` to git. If secrets were ever committed/pushed, rotate them immediately.
+
+## Contributors
+
+- (Add contributors here)
 
 ## License
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+UNLICENSED
