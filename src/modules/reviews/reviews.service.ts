@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException, UnauthorizedExcepti
 import { AuthRepository } from '@infra/repositories/auth.repository';
 import { ReviewsRepository } from '@infra/repositories/reviews.repository';
 import { uploadBufferToCloudinary } from '@infra/cloudinary/cloudinary.service';
+import { SupportRepository } from '@infra/repositories/support.repository';
 
 const COMMENT_MAX_LENGTH = 100; // matches DB VarChar(100)
 const MAX_IMAGES = 6;
@@ -32,6 +33,7 @@ export class ReviewsService {
   constructor(
     private readonly reviewsRepo: ReviewsRepository,
     private readonly authRepo: AuthRepository,
+    private readonly supportRepo: SupportRepository,
   ) {}
 
   async createReview(
@@ -196,6 +198,50 @@ export class ReviewsService {
       reviewId: updated.ReviewID,
       isHidden: updated.IsHidden,
     };
+  }
+
+  async requestEnterpriseReviewVisibility(accountId: string, params: {
+    reviewId: string;
+    action: 'hide' | 'show';
+    reason: string;
+  }) {
+    const { reviewId, action, reason } = params;
+    if (!reviewId || !action || !reason?.trim()) {
+      throw new BadRequestException('reviewId, action and reason are required');
+    }
+    const sanitizedReason = reason.trim();
+    if (sanitizedReason.length < 8) {
+      throw new BadRequestException('Reason should be at least 8 characters');
+    }
+
+    const enterprise = await this.reviewsRepo.getEnterpriseIdByAccountId(accountId);
+    if (!enterprise) {
+      throw new UnauthorizedException('Enterprise not found');
+    }
+
+    const full = await this.reviewsRepo.findVisibilityContext(reviewId);
+    if (!full || full.EnterpriseID !== enterprise) {
+      throw new NotFoundException('Review not found');
+    }
+
+    const subject = `Review visibility request (${action.toUpperCase()})`;
+    const descriptionLines = [
+      `Review ID: ${reviewId}`,
+      `Enterprise: ${enterprise}`,
+      `Current status: ${full?.IsHidden ? 'Hidden' : 'Active'}`,
+      `Requested action: ${action === 'hide' ? 'Hide from public listing' : 'Restore to public listing'}`,
+      `Rating: ${full?.Rating ?? 'N/A'}`,
+      `Comment: ${full?.Comment || 'No comment provided'}`,
+      `Reason: ${sanitizedReason}`,
+    ];
+
+    const ticket = await this.supportRepo.create({
+      accountId,
+      subject,
+      description: descriptionLines.join(' | '),
+    });
+
+    return { success: true, ticketId: ticket.MessageID };
   }
 
   async getAdminReviews(criteria: {

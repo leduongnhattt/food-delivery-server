@@ -227,4 +227,18 @@ export class ReviewsRepository {
       select: { ReviewID: true, EnterpriseID: true },
     });
   }
+
+  async findVisibilityContext(reviewId: string) {
+    return this.prisma.review.findUnique({
+      where: { ReviewID: reviewId },
+      select: {
+        ReviewID: true,
+        EnterpriseID: true,
+        Rating: true,
+        Comment: true,
+        IsHidden: true,
+        CreatedAt: true,
+      },
+    });
+  }
 }

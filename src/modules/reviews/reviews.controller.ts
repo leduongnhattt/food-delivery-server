@@ -2,11 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
-  Get,
-  Param,
-  Patch,
   Post,
-  Query,
   Req,
   UnauthorizedException,
   UseGuards,
@@ -74,60 +70,6 @@ export class ReviewsController {
         comment: comment ?? undefined,
       },
       imageBuffers,
-    );
-  }
-
-  @Get('enterprise/reviews')
-  @UseGuards(JwtAuthGuard)
-  async getEnterpriseReviews(
-    @Req() req: Request,
-    @CurrentAccount() account: JwtPayload | null,
-    @Query('q') q?: string,
-    @Query('rating') rating?: string,
-    @Query('status') status?: string,
-    @Query('startDate') startDate?: string,
-    @Query('endDate') endDate?: string,
-    @Query('sort') sort?: string,
-    @Query('page') pageStr?: string,
-    @Query('limit') limitStr?: string,
-  ) {
-    if (!account || !account.accountId) {
-      throw new UnauthorizedException('Unauthorized');
-    }
-    const accountId = account.accountId;
-    return this.reviewsService.getEnterpriseReviews(accountId, {
-      q,
-      rating,
-      status,
-      startDate,
-      endDate,
-      sort,
-      page: pageStr != null ? parseInt(pageStr, 10) : undefined,
-      limit: limitStr != null ? parseInt(limitStr, 10) : undefined,
-    });
-  }
-
-  @Patch('enterprise/reviews/:id')
-  @UseGuards(JwtAuthGuard)
-  async patchEnterpriseReview(
-    @Req() req: Request,
-    @CurrentAccount() account: JwtPayload | null,
-    @Param('id') id: string,
-    @Body() body: { isHidden?: boolean },
-  ) {
-    if (!account || !account.accountId) {
-      throw new UnauthorizedException('Unauthorized');
-    }
-    const accountId = account.accountId;
-    if (typeof body.isHidden !== 'boolean') {
-      throw new BadRequestException(
-        'Invalid payload: isHidden must be a boolean',
-      );
-    }
-    return this.reviewsService.patchEnterpriseReview(
-      accountId,
-      id,
-      body.isHidden,
     );
   }
 

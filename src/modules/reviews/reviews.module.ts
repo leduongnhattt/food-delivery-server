@@ -4,6 +4,7 @@ import { memoryStorage, type StorageEngine } from 'multer';
 import { PrismaModule } from '@infra/prisma/prisma.module';
 import { AuthModule } from '@modules/auth/auth.module';
 import { ReviewsRepository } from '@infra/repositories/reviews.repository';
+import { SupportRepository } from '@infra/repositories/support.repository';
 import { ReviewsController } from '@modules/reviews/reviews.controller';
 import { ReviewsService } from '@modules/reviews/reviews.service';
 
@@ -19,7 +20,7 @@ const reviewsUploadStorage: StorageEngine = memoryStorage();
     MulterModule.register({ storage: reviewsUploadStorage }),
   ],
   controllers: [ReviewsController],
-  providers: [ReviewsRepository, ReviewsService],
+  providers: [ReviewsRepository, SupportRepository, ReviewsService],
   exports: [ReviewsService],
 })
 export class ReviewsModule {}
