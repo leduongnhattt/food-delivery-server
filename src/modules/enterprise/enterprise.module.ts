@@ -13,6 +13,8 @@ import { EnterpriseCheckDataService } from '@modules/enterprise/check-data/enter
 import { EnterpriseMenuController } from '@modules/enterprise/menu/enterprise-menu.controller';
 import { EnterpriseMenuService } from '@modules/enterprise/menu/enterprise-menu.service';
 import { EnterpriseFoodImageController } from '@modules/enterprise/upload/enterprise-food-image.controller';
+import { EnterpriseProfileController } from '@modules/enterprise/profile/enterprise-profile.controller';
+import { EnterpriseProfileService } from '@modules/enterprise/profile/enterprise-profile.service';
 
 @Module({
   imports: [AuthModule],
@@ -25,6 +27,7 @@ import { EnterpriseFoodImageController } from '@modules/enterprise/upload/enterp
     EnterpriseCheckDataController,
     EnterpriseMenuController,
     EnterpriseFoodImageController,
+    EnterpriseProfileController,
   ],
   providers: [
     EnterpriseCategoryService,
@@ -32,6 +35,7 @@ import { EnterpriseFoodImageController } from '@modules/enterprise/upload/enterp
     EnterpriseDashboardService,
     EnterpriseCheckDataService,
     EnterpriseMenuService,
+    EnterpriseProfileService,
   ],
 })
 export class EnterpriseModule {}
