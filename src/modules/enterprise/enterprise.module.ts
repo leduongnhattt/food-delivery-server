@@ -15,9 +15,17 @@ import { EnterpriseMenuService } from '@modules/enterprise/menu/enterprise-menu.
 import { EnterpriseFoodImageController } from '@modules/enterprise/upload/enterprise-food-image.controller';
 import { EnterpriseProfileController } from '@modules/enterprise/profile/enterprise-profile.controller';
 import { EnterpriseProfileService } from '@modules/enterprise/profile/enterprise-profile.service';
+import { EnterpriseOrdersController } from '@modules/enterprise/orders/enterprise-orders.controller';
+import { EnterpriseOrdersService } from '@modules/enterprise/orders/enterprise-orders.service';
+import { EnterpriseVoucherController } from '@modules/enterprise/voucher/enterprise-voucher.controller';
+import { EnterpriseVoucherService } from '@modules/enterprise/voucher/enterprise-voucher.service';
+import { VouchersModule } from '@modules/vouchers/vouchers.module';
+import { EnterpriseLocalUploadController } from '@modules/enterprise/upload/enterprise-local-upload.controller';
+import { EnterpriseReviewsController } from '@modules/enterprise/reviews/enterprise-reviews.controller';
+import { ReviewsModule } from '@modules/reviews/reviews.module';
 
 @Module({
-  imports: [AuthModule],
+  imports: [AuthModule, VouchersModule, ReviewsModule],
   controllers: [
     EnterpriseAvatarController,
     EnterpriseCategoryController,
@@ -28,6 +36,10 @@ import { EnterpriseProfileService } from '@modules/enterprise/profile/enterprise
     EnterpriseMenuController,
     EnterpriseFoodImageController,
     EnterpriseProfileController,
+    EnterpriseOrdersController,
+    EnterpriseVoucherController,
+    EnterpriseLocalUploadController,
+    EnterpriseReviewsController,
   ],
   providers: [
     EnterpriseCategoryService,
@@ -36,6 +48,8 @@ import { EnterpriseProfileService } from '@modules/enterprise/profile/enterprise
     EnterpriseCheckDataService,
     EnterpriseMenuService,
     EnterpriseProfileService,
+    EnterpriseOrdersService,
+    EnterpriseVoucherService,
   ],
 })
 export class EnterpriseModule {}
