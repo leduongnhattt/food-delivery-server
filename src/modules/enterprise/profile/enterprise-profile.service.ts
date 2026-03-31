@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '@infra/prisma/prisma.service';
+import { Prisma } from '@prisma/client';
 
 export type EnterpriseProfileInclude = 'menus' | 'foods' | 'vouchers' | null;
 
@@ -35,9 +36,9 @@ export class EnterpriseProfileService {
           Avatar: true,
         },
       },
-    } satisfies Parameters<typeof this.prisma.enterprise.findUnique>[0]['select'];
+    } satisfies Prisma.EnterpriseSelect;
 
-    const select: any = { ...baseSelect };
+    const select: Prisma.EnterpriseSelect = { ...baseSelect };
 
     if (include === 'menus') {
       select.menus = {
@@ -47,7 +48,7 @@ export class EnterpriseProfileService {
           Description: true,
         },
         orderBy: { MenuName: 'asc' },
-      };
+      } satisfies Prisma.MenuFindManyArgs;
     } else if (include === 'foods') {
       select.foods = {
         select: {
@@ -65,7 +66,7 @@ export class EnterpriseProfileService {
             },
           },
         },
-      };
+      } satisfies Prisma.FoodFindManyArgs;
     } else if (include === 'vouchers') {
       select.vouchers = {
         select: {
@@ -76,7 +77,7 @@ export class EnterpriseProfileService {
           Status: true,
         },
         orderBy: { ExpiryDate: 'asc' },
-      };
+      } satisfies Prisma.VoucherFindManyArgs;
     }
 
     const enterprise = await this.prisma.enterprise.findUnique({

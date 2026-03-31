@@ -20,9 +20,9 @@ import type { JwtPayload } from '@modules/auth/auth.service';
 export class EnterpriseCacheController {
   @Post('invalidate')
   @UseGuards(JwtAuthGuard)
-  async invalidate(
+  invalidate(
     @CurrentAccount() account: JwtPayload | null,
-  ): Promise<{ success: true; message: string }> {
+  ): { success: true; message: string } {
     const role = (account?.role || '').trim().toLowerCase();
     if (!account?.accountId || role !== 'enterprise') {
       throw new BadRequestException('Unauthorized');
@@ -32,7 +32,7 @@ export class EnterpriseCacheController {
 
   @Get('invalidate')
   @UseGuards(JwtAuthGuard)
-  async stats(@CurrentAccount() account: JwtPayload | null) {
+  stats(@CurrentAccount() account: JwtPayload | null) {
     const role = (account?.role || '').trim().toLowerCase();
     if (!account?.accountId || role !== 'enterprise') {
       throw new BadRequestException('Unauthorized');

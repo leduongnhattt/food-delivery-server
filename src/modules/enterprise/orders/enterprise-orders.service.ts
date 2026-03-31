@@ -1,6 +1,27 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '@infra/prisma/prisma.service';
 import { deleteKey, getKeyJson, setKeyJson } from '@infra/redis/redis.service';
+import { Prisma } from '@prisma/client';
+
+const ordersInclude = {
+  customer: {
+    select: {
+      FullName: true,
+      PhoneNumber: true,
+      Address: true,
+      account: { select: { Username: true } },
+    },
+  },
+  orderDetails: {
+    select: {
+      Quantity: true,
+      SubTotal: true,
+      food: { select: { DishName: true } },
+    },
+  },
+} as const satisfies Prisma.OrderInclude;
+
+type OrderRow = Prisma.OrderGetPayload<{ include: typeof ordersInclude }>;
 
 export interface EnterpriseCachedOrder {
   id: string;
@@ -51,7 +72,9 @@ export class EnterpriseOrdersService {
     return enterprise.EnterpriseID;
   }
 
-  private formatOrderRows(rows: Array<any>): EnterpriseCachedOrder[] {
+  private formatOrderRows(
+    rows: OrderRow[],
+  ): EnterpriseCachedOrder[] {
     return rows.map((order) => ({
       id: order.OrderID,
       customerName:
@@ -63,13 +86,13 @@ export class EnterpriseOrdersService {
       status: order.Status,
       createdAt: order.OrderDate.toISOString(),
       items: order.orderDetails.reduce(
-        (sum: number, d: any) => sum + d.Quantity,
+        (sum, d) => sum + d.Quantity,
         0,
       ),
       deliveryAddress: order.DeliveryAddress,
       phoneNumber: order.customer?.PhoneNumber || null,
       customerAddress: order.customer?.Address || null,
-      orderDetails: order.orderDetails.map((d: any) => ({
+      orderDetails: order.orderDetails.map((d) => ({
         dishName: d.food.DishName,
         quantity: d.Quantity,
         subTotal: Number(d.SubTotal),
@@ -97,23 +120,7 @@ export class EnterpriseOrdersService {
           some: { food: { EnterpriseID: enterpriseId } },
         },
       },
-      include: {
-        customer: {
-          select: {
-            FullName: true,
-            PhoneNumber: true,
-            Address: true,
-            account: { select: { Username: true } },
-          },
-        },
-        orderDetails: {
-          select: {
-            Quantity: true,
-            SubTotal: true,
-            food: { select: { DishName: true } },
-          },
-        },
-      },
+      include: ordersInclude,
       orderBy: { OrderDate: 'desc' },
     });
 
@@ -149,23 +156,7 @@ export class EnterpriseOrdersService {
           some: { food: { EnterpriseID: enterpriseId } },
         },
       },
-      include: {
-        customer: {
-          select: {
-            FullName: true,
-            PhoneNumber: true,
-            Address: true,
-            account: { select: { Username: true } },
-          },
-        },
-        orderDetails: {
-          select: {
-            Quantity: true,
-            SubTotal: true,
-            food: { select: { DishName: true } },
-          },
-        },
-      },
+      include: ordersInclude,
       orderBy: { OrderDate: 'desc' },
       take: 10,
     });
