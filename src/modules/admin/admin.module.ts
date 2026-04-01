@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AdminCustomersModule } from './admin-customers/admin-customers.module';
+import { AdminDashboardModule } from './admin-dashboard/admin-dashboard.module';
 import { AdminEnterprisesModule } from './admin-enterprises/admin-enterprises.module';
 import { AdminProfileModule } from './admin-profile/admin-profile.module';
 import { AdminReviewsModule } from './admin-reviews/admin-reviews.module';
@@ -11,6 +12,7 @@ import { AdminVouchersModule } from './admin-vouchers/admin-vouchers.module';
  */
 @Module({
   imports: [
+    AdminDashboardModule,
     AdminCustomersModule,
     AdminEnterprisesModule,
     AdminProfileModule,
