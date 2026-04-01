@@ -18,6 +18,9 @@ import { AdminModule } from '@modules/admin/admin.module';
 import { WebhooksModule } from '@modules/webhooks/webhooks.module';
 import { CategoriesModule } from '@modules/categories/categories.module';
 import { EnterpriseModule } from '@modules/enterprise/enterprise.module';
+import { SettingsModule } from '@modules/settings/settings.module';
+import { StockModule } from '@modules/stock/stock.module';
+import { RegistryModule } from '@modules/registry/registry.module';
 
 @Module({
   imports: [
@@ -38,6 +41,9 @@ import { EnterpriseModule } from '@modules/enterprise/enterprise.module';
     WebhooksModule,
     CategoriesModule,
     EnterpriseModule,
+    SettingsModule,
+    StockModule,
+    RegistryModule,
   ],
   controllers: [AppController],
   providers: [AppService],
