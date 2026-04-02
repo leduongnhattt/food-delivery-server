@@ -5,6 +5,7 @@ import { AuthPasswordService } from '@modules/auth/password/password.service';
 import type { Secret, SignOptions } from 'jsonwebtoken';
 import { sign as jwtSign, verify as jwtVerify } from 'jsonwebtoken';
 import { createHash, randomBytes } from 'crypto';
+import { PAYMENT_METHOD } from '@common/constants/payment-method.constants';
 
 export type JwtPayload = {
   accountId: string;
@@ -72,7 +73,7 @@ export class AuthService {
       FullName: params.username,
       PhoneNumber: '00000000000',
       Address: 'Default Address',
-      PreferredPaymentMethod: 'Cash',
+      PreferredPaymentMethod: PAYMENT_METHOD.Cash,
     });
     return { ...account, customer };
   }

@@ -2,6 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { OrderStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '@infra/prisma/prisma.service';
 import type { OrderCartItemDto } from '@modules/orders/orders.service';
+import { ORDER_STATUS, PAYMENT_STATUS } from '@common/constants/order-payment-status.constants';
+import { PAYMENT_METHOD } from '@common/constants/payment-method.constants';
 
 export interface OrderListCriteria {
   customerId: string;
@@ -179,7 +181,7 @@ export class OrdersRepository {
         TotalAmount: params.totalAmount,
         DeliveryAddress: params.deliveryAddress,
         DeliveryNote: '',
-        Status: 'Pending',
+        Status: ORDER_STATUS.Pending,
       },
     });
 
@@ -202,9 +204,9 @@ export class OrdersRepository {
         data: {
           PaymentID: params.paymentIntentId,
           OrderID: order.OrderID,
-          PaymentMethod: 'CreditCard',
+          PaymentMethod: PAYMENT_METHOD.CreditCard,
           TransactionID: params.paymentIntentId,
-          PaymentStatus: 'Completed',
+          PaymentStatus: PAYMENT_STATUS.Completed,
           TransactionData: {
             payment_intent_id: params.paymentIntentId,
             status: 'succeeded',
@@ -240,7 +242,7 @@ export class OrdersRepository {
         TotalAmount: order.TotalAmount,
         DeliveryAddress: order.DeliveryAddress,
         DeliveryNote: order.DeliveryNote,
-        Status: 'Pending',
+        Status: ORDER_STATUS.Pending,
       },
     });
 

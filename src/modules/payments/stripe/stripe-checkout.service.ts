@@ -3,6 +3,9 @@ import Stripe from 'stripe';
 import { PrismaService } from '@infra/prisma/prisma.service';
 import { StripeService } from '@infra/stripe/stripe.service';
 import type { CreateCheckoutSessionRequestDto } from '@modules/payments/dto';
+import { PAYMENT_STATUS } from '@common/constants/order-payment-status.constants';
+import { PAYMENT_PROVIDER } from '@common/constants/payment-provider.constants';
+import { PAYMENT_METHOD } from '@common/constants/payment-method.constants';
 
 /**
  * Handles Stripe Checkout API: session creation, line items, commission fee, and voucher coupons.
@@ -107,10 +110,10 @@ export class StripeCheckoutService {
             const payment = await tx.payment.create({
                 data: {
                     OrderID: order.OrderID,
-                    PaymentMethod: 'CreditCard',
-                    PaymentStatus: 'Pending',
+                    PaymentMethod: PAYMENT_METHOD.CreditCard,
+                    PaymentStatus: PAYMENT_STATUS.Pending,
                     TransactionData: {
-                        provider: 'STRIPE',
+                        provider: PAYMENT_PROVIDER.Stripe,
                     },
                 },
             });

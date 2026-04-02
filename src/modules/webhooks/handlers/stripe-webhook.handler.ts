@@ -4,6 +4,8 @@ import { StripeService } from '@infra/stripe/stripe.service';
 import { CommissionSettlementService } from '@modules/payments/commission-settlement/commission-settlement.service';
 import { CartService } from '@modules/cart/cart.service';
 import type Stripe from 'stripe';
+import { ORDER_STATUS, PAYMENT_STATUS } from '@common/constants/order-payment-status.constants';
+import { PAYMENT_PROVIDER } from '@common/constants/payment-provider.constants';
 
 @Injectable()
 export class StripeWebhookHandler {
@@ -72,7 +74,7 @@ export class StripeWebhookHandler {
             );
             return;
         }
-        if (existingPayment.PaymentStatus === 'Completed') {
+        if (existingPayment.PaymentStatus === PAYMENT_STATUS.Completed) {
             return;
         }
 
@@ -80,11 +82,11 @@ export class StripeWebhookHandler {
             await tx.payment.update({
                 where: { PaymentID: existingPayment.PaymentID },
                 data: {
-                    PaymentStatus: 'Completed',
+                    PaymentStatus: PAYMENT_STATUS.Completed,
                     TransactionID: paymentIntent.id,
                     TransactionData: {
                         ...(existingPayment.TransactionData as object),
-                        provider: 'STRIPE',
+                        provider: PAYMENT_PROVIDER.Stripe,
                         status: paymentIntent.status,
                         amount: paymentIntent.amount,
                         currency: paymentIntent.currency,
@@ -99,11 +101,11 @@ export class StripeWebhookHandler {
                 },
             });
 
-            if (existingPayment.order.Status === 'Pending') {
+            if (existingPayment.order.Status === ORDER_STATUS.Pending) {
                 await tx.order.update({
                     where: { OrderID: existingPayment.OrderID },
                     data: {
-                        Status: 'Confirmed',
+                        Status: ORDER_STATUS.Confirmed,
                         TotalAmount: paymentIntent.amount / 100,
                     },
                 });
@@ -153,11 +155,11 @@ export class StripeWebhookHandler {
             await tx.payment.update({
                 where: { PaymentID: existingPayment.PaymentID },
                 data: {
-                    PaymentStatus: 'Failed',
+                    PaymentStatus: PAYMENT_STATUS.Failed,
                     TransactionID: paymentIntent.id,
                     TransactionData: {
                         ...(existingPayment.TransactionData as object),
-                        provider: 'STRIPE',
+                        provider: PAYMENT_PROVIDER.Stripe,
                         status: paymentIntent.status,
                         amount: paymentIntent.amount,
                         currency: paymentIntent.currency,

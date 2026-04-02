@@ -4,6 +4,7 @@ import { StripeWebhookHandler } from '@modules/webhooks/handlers/stripe-webhook.
 import { WebhookDispatcherService } from '@modules/webhooks/webhook-dispatcher.service';
 import { CartModule } from '@modules/cart/cart.module';
 import { CommissionSettlementModule } from '@modules/payments/commission-settlement/commission-settlement.module';
+import { PaymentsModule } from '@modules/payments/payments.module';
 
 /**
  * System-level webhooks module.
@@ -11,7 +12,7 @@ import { CommissionSettlementModule } from '@modules/payments/commission-settlem
  * without coupling to a specific feature module (e.g. payments only).
  */
 @Module({
-    imports: [CartModule, CommissionSettlementModule],
+    imports: [CartModule, CommissionSettlementModule, PaymentsModule],
     controllers: [WebhooksController],
     providers: [WebhookDispatcherService, StripeWebhookHandler],
     exports: [WebhookDispatcherService],
