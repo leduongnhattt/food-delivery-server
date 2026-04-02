@@ -1,6 +1,7 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { OrdersRepository, OrderListCriteria } from '@infra/repositories/orders.repository';
 import { CustomersService } from '@modules/customers/customers.service';
+import { PAYMENT_METHOD } from '@common/constants/payment-method.constants';
 
 export interface OrderItemDto {
   id: string;
@@ -155,7 +156,7 @@ export class OrdersService {
       status: String(order.Status).toLowerCase(),
       deliveryAddress: order.DeliveryAddress,
       deliveryInstructions: order.DeliveryNote || undefined,
-      paymentMethod: order.payments[0]?.PaymentMethod || 'CreditCard',
+      paymentMethod: order.payments[0]?.PaymentMethod || PAYMENT_METHOD.CreditCard,
       createdAt: order.OrderDate.toISOString(),
       updatedAt: new Date().toISOString(),
       estimatedDeliveryTime: order.EstimatedDeliveryTime?.toISOString(),

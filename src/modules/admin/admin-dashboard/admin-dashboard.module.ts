@@ -8,5 +8,5 @@ import { AdminDashboardService } from './admin-dashboard.service';
   controllers: [AdminDashboardController],
   providers: [AdminDashboardService],
 })
-export class AdminDashboardModule {}
+export class AdminDashboardModule { }
 

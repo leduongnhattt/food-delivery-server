@@ -9,6 +9,8 @@ import { CartService } from '@modules/cart/cart.service';
 import { CommissionSettlementService } from '@modules/payments/commission-settlement/commission-settlement.service';
 import { StripeCheckoutService } from '@modules/payments/stripe/stripe-checkout.service';
 import { ITEM_ORDER_VALUE_LIMIT } from '@shared/constants/order-limit';
+import { PAYMENT_STATUS } from '@common/constants/order-payment-status.constants';
+import { PAYMENT_PROVIDER } from '@common/constants/payment-provider.constants';
 
 /** Cart item with food and enterprise (from Prisma findMany include). */
 type CartItemWithFood = Prisma.CartItemGetPayload<{
@@ -96,11 +98,11 @@ export class CheckoutSuccessService {
                 await tx.payment.update({
                     where: { PaymentID: payment.PaymentID },
                     data: {
-                        PaymentStatus: 'Completed',
+                        PaymentStatus: PAYMENT_STATUS.Completed,
                         TransactionID: (session.payment_intent as string) || undefined,
                         TransactionData: {
                             ...(payment.TransactionData as object),
-                            provider: 'STRIPE',
+                            provider: PAYMENT_PROVIDER.Stripe,
                             session_id: sessionId,
                             payment_intent:
                                 typeof session.payment_intent === 'string'
