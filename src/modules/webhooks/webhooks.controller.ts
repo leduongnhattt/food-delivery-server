@@ -1,9 +1,11 @@
 import {
     BadRequestException,
     Controller,
+    Get,
     Headers,
     HttpCode,
     InternalServerErrorException,
+    Query,
     Post,
     Req,
 } from '@nestjs/common';
@@ -41,6 +43,12 @@ export class WebhooksController {
             }
             throw new InternalServerErrorException(message);
         }
+    }
+
+    @Get('vnpay/ipn')
+    async handleVnPayIpn(@Query() query: Record<string, string | undefined>) {
+        // VNPay sends querystring params. Signature is verified in the handler.
+        return this.dispatcher.dispatchVnPayIpn(query);
     }
 }
 

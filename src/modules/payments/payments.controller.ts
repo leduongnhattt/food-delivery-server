@@ -13,12 +13,14 @@ import {
     PaymentsService,
     type CreateCheckoutSessionRequestDto,
 } from '@modules/payments/payments.service';
+import { VnPayService } from '@modules/payments/vnpay/vnpay.service';
 
 @Controller('payments')
 export class PaymentsController {
     constructor(
         private readonly paymentsService: PaymentsService,
         private readonly authService: AuthService,
+        private readonly vnpay: VnPayService,
     ) { }
 
     @Post('create-checkout-session')
@@ -94,5 +96,31 @@ export class PaymentsController {
             accountId: decoded.accountId,
             sessionId,
         });
+    }
+
+    @Post('vnpay/create-payment-url')
+    async createVnPayPaymentUrl(
+        @Req() req: Request,
+        @Body() body: CreateCheckoutSessionRequestDto,
+    ) {
+        const authHeader = req.headers['authorization'];
+        const token = authHeader?.replace(/^Bearer\s+/i, '');
+        if (!token) {
+            throw new UnauthorizedException('Unauthorized');
+        }
+        const decoded = this.authService.verifyAccessToken(token);
+        if (!decoded?.accountId) {
+            throw new UnauthorizedException('Invalid or expired token');
+        }
+        return this.vnpay.createPaymentUrl(decoded.accountId, body);
+    }
+
+    /**
+     * Verify return-URL query (browser redirect from VNPAY). Public: security is the HMAC itself.
+     * Client should pass all `vnp_*` query params unchanged.
+     */
+    @Get('vnpay/verify-return')
+    verifyVnPayReturn(@Query() query: Record<string, string | undefined>) {
+        return this.vnpay.verifyReturnQuery(query);
     }
 }

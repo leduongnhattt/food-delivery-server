@@ -614,6 +614,7 @@ enum PaymentMethod {
   Cash
   CreditCard
   MoMo
+  VNPay
   BankTransfer
 }
 
