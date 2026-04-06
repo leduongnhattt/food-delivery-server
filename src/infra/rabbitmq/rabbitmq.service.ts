@@ -73,7 +73,7 @@ export class RabbitMqService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async publishAdminReplied(payload: SupportAdminRepliedPayload): Promise<void> {
+  publishAdminReplied(payload: SupportAdminRepliedPayload): void {
     if (!this.channel || !this.ready) {
       this.logger.warn('RabbitMQ not ready; skipping publish');
       return;

@@ -142,7 +142,7 @@ export class AdminSupportService {
     });
     const roleName =
       (await this.supportRepo.getAccountRoleName(ticket.AccountID)) || '';
-    await this.rabbit.publishAdminReplied({
+    this.rabbit.publishAdminReplied({
       ticketId,
       ticketCategory: ticket.Category,
       ticketStatus: updated.Status,
