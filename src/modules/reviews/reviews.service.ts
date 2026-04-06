@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException, UnauthorizedException } from '@nestjs/common';
+import { SupportCategory } from '@prisma/client';
 import { AuthRepository } from '@infra/repositories/auth.repository';
 import { ReviewsRepository } from '@infra/repositories/reviews.repository';
 import { uploadBufferToCloudinary } from '@infra/cloudinary/cloudinary.service';
@@ -239,6 +240,7 @@ export class ReviewsService {
       accountId,
       subject,
       description: descriptionLines.join(' | '),
+      category: SupportCategory.ReviewModeration,
     });
 
     return { success: true, ticketId: ticket.MessageID };
