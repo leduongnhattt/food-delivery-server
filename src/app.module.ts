@@ -21,9 +21,14 @@ import { EnterpriseModule } from '@modules/enterprise/enterprise.module';
 import { SettingsModule } from '@modules/settings/settings.module';
 import { StockModule } from '@modules/stock/stock.module';
 import { RegistryModule } from '@modules/registry/registry.module';
+import { SupportModule } from '@modules/support/support.module';
+import { MailModule } from '@infra/mail/mail.module';
+import { RabbitMqModule } from '@infra/rabbitmq/rabbitmq.module';
 
 @Module({
   imports: [
+    MailModule,
+    RabbitMqModule,
     PrismaModule,
     StripeModule,
     FoodsModule,
@@ -44,6 +49,7 @@ import { RegistryModule } from '@modules/registry/registry.module';
     SettingsModule,
     StockModule,
     RegistryModule,
+    SupportModule,
   ],
   controllers: [AppController],
   providers: [AppService],

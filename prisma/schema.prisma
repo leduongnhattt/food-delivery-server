@@ -126,6 +126,7 @@ model Admin {
   account  Account   @relation(fields: [AccountID], references: [AccountID], onDelete: Cascade)
   vouchers Voucher[]
   foodCategories FoodCategory[]
+  assignedSupportTickets Support[] @relation("SupportAssignedAdmin")
   platformCommissionDefaultsUpdated     PlatformCommissionDefault[]     @relation("PlatformCommissionDefaultUpdatedBy")
   categoryCommissionDefaultsUpdated     CategoryCommissionDefault[]     @relation("CategoryCommissionDefaultUpdatedBy")
   deductionRulesCreated               DeductionRule[]                  @relation("DeductionRuleCreatedBy")
@@ -505,20 +506,43 @@ model AuditLog {
 }
 
 model Support {
-  MessageID    String        @id @default(uuid()) @db.VarChar(36)
-  AccountID    String        @db.VarChar(36)
-  Subject      String        @db.VarChar(255)
-  Description  String?       @db.Text
-  SentAt       DateTime      @default(now())
-  Status       SupportStatus @default(Pending)
-  ReplyMessage String?       @db.Text
+  MessageID         String           @id @default(uuid()) @db.VarChar(36)
+  AccountID         String           @db.VarChar(36)
+  Subject           String           @db.VarChar(255)
+  Description       String?          @db.Text
+  SentAt            DateTime         @default(now())
+  Status            SupportStatus    @default(Pending)
+  ReplyMessage      String?          @db.Text
+  Category          SupportCategory  @default(General)
+  AssignedAdminID   String?          @db.VarChar(36)
+  AssignedAt        DateTime?
+  UpdatedAt         DateTime?        @updatedAt
+  LastActivityAt    DateTime?
 
-  account Account @relation(fields: [AccountID], references: [AccountID], onDelete: Cascade)
+  account       Account @relation(fields: [AccountID], references: [AccountID], onDelete: Cascade)
+  assignedAdmin Admin?  @relation("SupportAssignedAdmin", fields: [AssignedAdminID], references: [AdminID], onDelete: SetNull)
+  messages     SupportMessage[]
 
   @@index([AccountID])
   @@index([Status])
   @@index([SentAt])
+  @@index([Category])
+  @@index([AssignedAdminID])
   @@map("SUPPORT")
+}
+
+model SupportMessage {
+  SupportMessageID String   @id @default(uuid()) @db.VarChar(36)
+  SupportID        String   @db.VarChar(36)
+  Sender           String   @db.VarChar(20) // 'User' | 'Admin'
+  Body             String   @db.Text
+  CreatedAt        DateTime @default(now())
+
+  support Support @relation(fields: [SupportID], references: [MessageID], onDelete: Cascade)
+
+  @@index([SupportID])
+  @@index([CreatedAt])
+  @@map("SUPPORT_MESSAGE")
 }
 
 model Review {
@@ -673,6 +697,22 @@ enum SupportStatus {
   InProgress
   Resolved
   Closed
+}
+
+enum SupportCategory {
+  General
+  ReviewModeration
+  AccountShop
+  MenuCatalog
+  OrderOperations
+  SettlementPayment
+  Promotions
+  Technical
+  Order
+  Delivery
+  PaymentRefund
+  Account
+  ComplaintRestaurant
 }
 
 enum DeductionType {

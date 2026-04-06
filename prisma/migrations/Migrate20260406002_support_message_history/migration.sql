@@ -1,0 +1,14 @@
+-- Add SUPPORT_MESSAGE to store full message history for support tickets.
+
+CREATE TABLE `SUPPORT_MESSAGE` (
+  `SupportMessageID` VARCHAR(36) NOT NULL,
+  `SupportID` VARCHAR(36) NOT NULL,
+  `Sender` VARCHAR(20) NOT NULL,
+  `Body` TEXT NOT NULL,
+  `CreatedAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (`SupportMessageID`),
+  INDEX `SUPPORT_MESSAGE_SupportID_idx` (`SupportID`),
+  INDEX `SUPPORT_MESSAGE_CreatedAt_idx` (`CreatedAt`),
+  CONSTRAINT `SUPPORT_MESSAGE_SupportID_fkey` FOREIGN KEY (`SupportID`) REFERENCES `SUPPORT`(`MessageID`) ON DELETE CASCADE ON UPDATE CASCADE
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
