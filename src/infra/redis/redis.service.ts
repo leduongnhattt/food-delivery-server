@@ -12,10 +12,16 @@ if (!redisConnectionUrl) {
 
 export const redisClient = redisConnectionUrl
   ? new Redis(redisConnectionUrl, {
-      maxRetriesPerRequest: 3,
-      enableAutoPipelining: true,
-    })
+    maxRetriesPerRequest: 3,
+    enableAutoPipelining: true,
+  })
   : (null as unknown as Redis);
+
+if (redisConnectionUrl) {
+  redisClient.on('error', (err) => {
+    console.error('[redis] client error:', err?.message ?? err);
+  });
+}
 
 export async function getKeyJson<T>(key: string): Promise<T | null> {
   if (!redisClient) return null;

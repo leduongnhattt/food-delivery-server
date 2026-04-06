@@ -4,6 +4,7 @@ import { AdminDashboardModule } from './admin-dashboard/admin-dashboard.module';
 import { AdminEnterprisesModule } from './admin-enterprises/admin-enterprises.module';
 import { AdminProfileModule } from './admin-profile/admin-profile.module';
 import { AdminReviewsModule } from './admin-reviews/admin-reviews.module';
+import { AdminSupportModule } from './admin-support/admin-support.module';
 import { AdminVouchersModule } from './admin-vouchers/admin-vouchers.module';
 
 /**
@@ -18,6 +19,7 @@ import { AdminVouchersModule } from './admin-vouchers/admin-vouchers.module';
     AdminProfileModule,
     AdminVouchersModule,
     AdminReviewsModule,
+    AdminSupportModule,
   ],
 })
 export class AdminModule {}
