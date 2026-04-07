@@ -112,10 +112,39 @@ export function buildSupportReplyEmailHtml(
                             <div style="font-size:12px;font-weight:800;color:#6b7280;text-transform:uppercase;letter-spacing:0.06em;">
                               Ticket details
                             </div>
-                            <div style="margin-top:8px;font-size:13px;line-height:1.6;color:#111827;">
-                              <div><strong>Ticket ID:</strong> <span style="word-break:break-all;">${safeTicketId}</span></div>
-                              ${safeCategory ? `<div><strong>Category:</strong> ${safeCategory}</div>` : ``}
-                              ${safeStatus ? `<div><strong>Status:</strong> ${safeStatus}</div>` : ``}
+                            <div style="margin-top:10px;">
+                              <div style="margin-bottom:10px;">
+                                <div style="font-size:11px;font-weight:800;color:#6b7280;text-transform:uppercase;letter-spacing:0.06em;">
+                                  Ticket ID
+                                </div>
+                                <div style="margin-top:4px;font-size:12px;line-height:1.5;color:#111827;word-break:break-all;">
+                                  ${safeTicketId}
+                                </div>
+                              </div>
+                              ${
+                                safeCategory
+                                  ? `<div style="margin-bottom:10px;">
+                                <div style="font-size:11px;font-weight:800;color:#6b7280;text-transform:uppercase;letter-spacing:0.06em;">
+                                  Category
+                                </div>
+                                <div style="margin-top:4px;font-size:12px;line-height:1.5;color:#111827;">
+                                  ${safeCategory}
+                                </div>
+                              </div>`
+                                  : ``
+                              }
+                              ${
+                                safeStatus
+                                  ? `<div style="margin-bottom:2px;">
+                                <div style="font-size:11px;font-weight:800;color:#6b7280;text-transform:uppercase;letter-spacing:0.06em;">
+                                  Status
+                                </div>
+                                <div style="margin-top:4px;font-size:12px;line-height:1.5;color:#111827;">
+                                  ${safeStatus}
+                                </div>
+                              </div>`
+                                  : ``
+                              }
                             </div>
                           </td>
                         </tr>
