@@ -1,7 +1,14 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '@infra/prisma/prisma.service';
 import { deleteKey, getKeyJson, setKeyJson } from '@infra/redis/redis.service';
-import { Prisma } from '@prisma/client';
+import { OrderStatus, PaymentStatus, Prisma } from '@prisma/client';
+import { ORDER_STATUS } from '@common/constants/order-payment-status.constants';
+import { isEnterpriseTransitionAllowed } from '@modules/enterprise/orders/enterprise-order-status.transitions';
 
 const ordersInclude = {
   customer: {
@@ -16,7 +23,18 @@ const ordersInclude = {
     select: {
       Quantity: true,
       SubTotal: true,
-      food: { select: { DishName: true } },
+      food: { select: { DishName: true, ImageURL: true } },
+    },
+  },
+  payments: {
+    orderBy: { PaymentDate: 'desc' as const },
+    take: 1,
+    select: {
+      PaymentID: true,
+      PaymentStatus: true,
+      PaymentMethod: true,
+      PaymentDate: true,
+      TransactionID: true,
     },
   },
 } as const satisfies Prisma.OrderInclude;
@@ -38,7 +56,15 @@ export interface EnterpriseCachedOrder {
     dishName: string;
     quantity: number;
     subTotal: number;
+    /** Product image for list row thumbnail (optional). */
+    imageUrl: string | null;
   }>;
+  /** SLA-style ship-by time for list UI (optional). */
+  estimatedDeliveryTime: string | null;
+  /** Latest payment (for Unpaid tab / badges). */
+  paymentId: string | null;
+  paymentStatus: string | null;
+  paymentMethod: string | null;
 }
 
 interface OrdersCachePayload {
@@ -48,8 +74,8 @@ interface OrdersCachePayload {
 }
 
 const CACHE_KEYS = {
-  orders: (enterpriseId: string) => `enterprise:${enterpriseId}:orders`,
-  recent: (enterpriseId: string) => `enterprise:${enterpriseId}:recent_orders`,
+  orders: (enterpriseId: string) => `enterprise:${enterpriseId}:orders:v3`,
+  recent: (enterpriseId: string) => `enterprise:${enterpriseId}:recent_orders:v3`,
   stats: (enterpriseId: string) => `enterprise:${enterpriseId}:stats`,
   revenue: (enterpriseId: string) => `enterprise:${enterpriseId}:revenue`,
 } as const;
@@ -58,6 +84,13 @@ const TTL_SECONDS = {
   orders: 5 * 60,
   recent: 2 * 60,
 } as const;
+
+const ENTERPRISE_SETTABLE_STATUSES: OrderStatus[] = [
+  OrderStatus.Confirmed,
+  OrderStatus.Preparing,
+  OrderStatus.ReadyForPickup,
+  OrderStatus.Cancelled,
+];
 
 @Injectable()
 export class EnterpriseOrdersService {
@@ -72,32 +105,44 @@ export class EnterpriseOrdersService {
     return enterprise.EnterpriseID;
   }
 
-  private formatOrderRows(
-    rows: OrderRow[],
-  ): EnterpriseCachedOrder[] {
-    return rows.map((order) => ({
-      id: order.OrderID,
-      customerName:
-        order.customer?.FullName ||
-        order.customer?.account?.Username ||
-        'Unknown Customer',
-      customerUsername: order.customer?.account?.Username || null,
-      totalAmount: Number(order.TotalAmount),
-      status: order.Status,
-      createdAt: order.OrderDate.toISOString(),
-      items: order.orderDetails.reduce(
-        (sum, d) => sum + d.Quantity,
-        0,
-      ),
-      deliveryAddress: order.DeliveryAddress,
-      phoneNumber: order.customer?.PhoneNumber || null,
-      customerAddress: order.customer?.Address || null,
-      orderDetails: order.orderDetails.map((d) => ({
-        dishName: d.food.DishName,
-        quantity: d.Quantity,
-        subTotal: Number(d.SubTotal),
-      })),
-    }));
+  private async invalidateEnterpriseCaches(enterpriseId: string): Promise<void> {
+    await Promise.all([
+      deleteKey(CACHE_KEYS.orders(enterpriseId)),
+      deleteKey(CACHE_KEYS.recent(enterpriseId)),
+      deleteKey(CACHE_KEYS.stats(enterpriseId)),
+      deleteKey(CACHE_KEYS.revenue(enterpriseId)),
+    ]);
+  }
+
+  private formatOrderRows(rows: OrderRow[]): EnterpriseCachedOrder[] {
+    return rows.map((order) => {
+      const latest = order.payments[0];
+      return {
+        id: order.OrderID,
+        customerName:
+          order.customer?.FullName ||
+          order.customer?.account?.Username ||
+          'Unknown Customer',
+        customerUsername: order.customer?.account?.Username || null,
+        totalAmount: Number(order.TotalAmount),
+        status: order.Status,
+        createdAt: order.OrderDate.toISOString(),
+        items: order.orderDetails.reduce((sum, d) => sum + d.Quantity, 0),
+        deliveryAddress: order.DeliveryAddress,
+        phoneNumber: order.customer?.PhoneNumber || null,
+        customerAddress: order.customer?.Address || null,
+        orderDetails: order.orderDetails.map((d) => ({
+          dishName: d.food.DishName,
+          quantity: d.Quantity,
+          subTotal: Number(d.SubTotal),
+          imageUrl: d.food.ImageURL ?? null,
+        })),
+        estimatedDeliveryTime: order.EstimatedDeliveryTime?.toISOString() ?? null,
+        paymentId: latest?.PaymentID ?? null,
+        paymentStatus: latest?.PaymentStatus ?? null,
+        paymentMethod: latest?.PaymentMethod ?? null,
+      };
+    });
   }
 
   async list(accountId: string) {
@@ -131,7 +176,11 @@ export class EnterpriseOrdersService {
       lastUpdated: new Date().toISOString(),
     };
     await setKeyJson(CACHE_KEYS.orders(enterpriseId), payload, TTL_SECONDS.orders);
-    await setKeyJson(CACHE_KEYS.recent(enterpriseId), orders.slice(0, 10), TTL_SECONDS.recent);
+    await setKeyJson(
+      CACHE_KEYS.recent(enterpriseId),
+      orders.slice(0, 10),
+      TTL_SECONDS.recent,
+    );
 
     return {
       success: true,
@@ -145,7 +194,9 @@ export class EnterpriseOrdersService {
   async recent(accountId: string) {
     const enterpriseId = await this.getEnterpriseIdByAccountId(accountId);
 
-    const cached = await getKeyJson<EnterpriseCachedOrder[]>(CACHE_KEYS.recent(enterpriseId));
+    const cached = await getKeyJson<EnterpriseCachedOrder[]>(
+      CACHE_KEYS.recent(enterpriseId),
+    );
     if (cached) {
       return { success: true, orders: cached, fromCache: true };
     }
@@ -166,6 +217,182 @@ export class EnterpriseOrdersService {
     return { success: true, orders, fromCache: false };
   }
 
+  /**
+   * Full order detail for enterprise dashboard (My Order detail screen).
+   */
+  async getById(accountId: string, orderId: string) {
+    if (!orderId?.trim()) {
+      throw new BadRequestException('Order id is required');
+    }
+    const enterpriseId = await this.getEnterpriseIdByAccountId(accountId);
+
+    const order = await this.prisma.order.findFirst({
+      where: {
+        OrderID: orderId,
+        orderDetails: {
+          some: { food: { EnterpriseID: enterpriseId } },
+        },
+      },
+      include: {
+        customer: {
+          select: {
+            FullName: true,
+            PhoneNumber: true,
+            Address: true,
+            account: { select: { Username: true, Email: true } },
+          },
+        },
+        orderDetails: {
+          include: {
+            food: {
+              select: {
+                FoodID: true,
+                DishName: true,
+                Price: true,
+                ImageURL: true,
+              },
+            },
+          },
+        },
+        payments: {
+          orderBy: { PaymentDate: 'desc' },
+        },
+      },
+    });
+
+    if (!order) {
+      throw new NotFoundException('Order not found or access denied');
+    }
+
+    return {
+      success: true,
+      order: {
+        orderId: order.OrderID,
+        status: order.Status,
+        totalAmount: Number(order.TotalAmount),
+        orderDate: order.OrderDate.toISOString(),
+        deliveryAddress: order.DeliveryAddress,
+        deliveryNote: order.DeliveryNote ?? '',
+        estimatedDeliveryTime: order.EstimatedDeliveryTime?.toISOString() ?? null,
+        deliveredAt: order.DeliveredAt?.toISOString() ?? null,
+        commissionAmount:
+          order.CommissionAmount != null ? Number(order.CommissionAmount) : null,
+        metadata: order.Metadata,
+        customer: {
+          fullName: order.customer?.FullName ?? null,
+          username: order.customer?.account?.Username ?? null,
+          email: order.customer?.account?.Email ?? null,
+          phoneNumber: order.customer?.PhoneNumber ?? null,
+          address: order.customer?.Address ?? null,
+        },
+        orderDetails: order.orderDetails.map((d) => ({
+          orderDetailId: d.OrderDetailID,
+          foodId: d.FoodID,
+          dishName: d.food.DishName,
+          unitPrice: Number(d.food.Price),
+          quantity: d.Quantity,
+          subTotal: Number(d.SubTotal),
+          imageUrl: d.food.ImageURL,
+        })),
+        payments: order.payments.map((p) => ({
+          paymentId: p.PaymentID,
+          status: p.PaymentStatus,
+          method: p.PaymentMethod,
+          paymentDate: p.PaymentDate.toISOString(),
+          transactionId: p.TransactionID,
+        })),
+      },
+    };
+  }
+
+  private parseTargetStatus(body: { status?: unknown }): OrderStatus {
+    const raw = body?.status;
+    if (typeof raw !== 'string') {
+      throw new BadRequestException('status is required');
+    }
+    const upper = raw.trim();
+    if (!Object.values(OrderStatus).includes(upper as OrderStatus)) {
+      throw new BadRequestException(`Invalid order status: ${raw}`);
+    }
+    return upper as OrderStatus;
+  }
+
+  /**
+   * Enterprise updates order status (kitchen ops + cancel before shipping).
+   */
+  async updateStatus(accountId: string, orderId: string, body: { status?: unknown }) {
+    if (!orderId?.trim()) {
+      throw new BadRequestException('Order id is required');
+    }
+    const target = this.parseTargetStatus(body);
+    if (!ENTERPRISE_SETTABLE_STATUSES.includes(target)) {
+      throw new BadRequestException(
+        `Enterprise cannot set status to ${target}. Allowed: ${ENTERPRISE_SETTABLE_STATUSES.join(', ')}`,
+      );
+    }
+
+    const enterpriseId = await this.getEnterpriseIdByAccountId(accountId);
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const order = await tx.order.findFirst({
+        where: {
+          OrderID: orderId,
+          orderDetails: {
+            some: { food: { EnterpriseID: enterpriseId } },
+          },
+        },
+        select: {
+          OrderID: true,
+          Status: true,
+        },
+      });
+
+      if (!order) {
+        throw new NotFoundException('Order not found or access denied');
+      }
+
+      if (order.Status === target) {
+        return { orderId: order.OrderID, status: target, unchanged: true as const };
+      }
+
+      if (!isEnterpriseTransitionAllowed(order.Status, target)) {
+        throw new ConflictException(
+          `Cannot transition from ${order.Status} to ${target}`,
+        );
+      }
+
+      const data: Prisma.OrderUpdateInput = { Status: target };
+      if (target === ORDER_STATUS.Cancelled) {
+        await tx.payment.updateMany({
+          where: {
+            OrderID: orderId,
+            PaymentStatus: PaymentStatus.Pending,
+          },
+          data: { PaymentStatus: PaymentStatus.Failed },
+        });
+      }
+
+      await tx.order.update({
+        where: { OrderID: orderId },
+        data,
+      });
+
+      return { orderId: order.OrderID, status: target, unchanged: false as const };
+    });
+
+    await this.invalidateEnterpriseCaches(enterpriseId);
+
+    return {
+      success: true,
+      orderId: result.orderId,
+      status: result.status,
+      unchanged: result.unchanged,
+    };
+  }
+
+  /**
+   * Hard delete only allowed for unpaid pending orders (audit-friendly).
+   */
   async delete(accountId: string, orderId: string) {
     if (!orderId) throw new BadRequestException('OrderId is required');
 
@@ -178,10 +405,26 @@ export class EnterpriseOrdersService {
           some: { food: { EnterpriseID: enterpriseId } },
         },
       },
-      select: { OrderID: true },
+      include: {
+        payments: { orderBy: { PaymentDate: 'desc' }, take: 1 },
+      },
     });
+
     if (!order) {
       throw new NotFoundException('Order not found or access denied');
+    }
+
+    if (order.Status !== OrderStatus.Pending) {
+      throw new ConflictException(
+        'Only pending orders can be deleted. Use status update to cancel confirmed orders.',
+      );
+    }
+
+    const latest = order.payments[0];
+    if (latest?.PaymentStatus === PaymentStatus.Completed) {
+      throw new ConflictException(
+        'Cannot delete an order with a completed payment. Use cancel instead.',
+      );
     }
 
     await this.prisma.$transaction(async (tx) => {
@@ -191,14 +434,8 @@ export class EnterpriseOrdersService {
       await tx.order.delete({ where: { OrderID: orderId } });
     });
 
-    await Promise.all([
-      deleteKey(CACHE_KEYS.orders(enterpriseId)),
-      deleteKey(CACHE_KEYS.recent(enterpriseId)),
-      deleteKey(CACHE_KEYS.stats(enterpriseId)),
-      deleteKey(CACHE_KEYS.revenue(enterpriseId)),
-    ]);
+    await this.invalidateEnterpriseCaches(enterpriseId);
 
     return { success: true, message: 'Order deleted successfully' };
   }
 }
-

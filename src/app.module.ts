@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ScheduleModule } from '@nestjs/schedule';
 import { AppController } from '@src/app.controller';
 import { AppService } from '@src/app.service';
 import { PrismaModule } from '@infra/prisma/prisma.module';
@@ -24,9 +25,11 @@ import { RegistryModule } from '@modules/registry/registry.module';
 import { SupportModule } from '@modules/support/support.module';
 import { MailModule } from '@infra/mail/mail.module';
 import { RabbitMqModule } from '@infra/rabbitmq/rabbitmq.module';
+import { JobsModule } from '@src/jobs/jobs.module';
 
 @Module({
   imports: [
+    ScheduleModule.forRoot(),
     MailModule,
     RabbitMqModule,
     PrismaModule,
@@ -38,6 +41,7 @@ import { RabbitMqModule } from '@infra/rabbitmq/rabbitmq.module';
     CartModule,
     CustomersModule,
     OrdersModule,
+    JobsModule,
     PaymentsModule,
     VouchersModule,
     HealthModule,
