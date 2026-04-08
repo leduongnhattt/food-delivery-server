@@ -9,7 +9,8 @@ export const ENTERPRISE_ALLOWED_TRANSITIONS: ReadonlyMap<
 > = new Map([
   [OrderStatus.Pending, [OrderStatus.Confirmed, OrderStatus.Cancelled]],
   [OrderStatus.Confirmed, [OrderStatus.Preparing, OrderStatus.Cancelled]],
-  [OrderStatus.Preparing, [OrderStatus.ReadyForPickup, OrderStatus.Cancelled]],
+  [OrderStatus.Preparing, [OrderStatus.ReadyForPickup, OrderStatus.OutForDelivery, OrderStatus.Cancelled]],
+  [OrderStatus.OutForDelivery, [OrderStatus.Delivered]],
   [OrderStatus.ReadyForPickup, []],
 ]);
 
