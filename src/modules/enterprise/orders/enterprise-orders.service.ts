@@ -52,6 +52,7 @@ export interface EnterpriseCachedOrder {
   deliveryAddress: string;
   phoneNumber: string | null;
   customerAddress: string | null;
+  metadata?: unknown;
   orderDetails: Array<{
     dishName: string;
     quantity: number;
@@ -89,12 +90,26 @@ const ENTERPRISE_SETTABLE_STATUSES: OrderStatus[] = [
   OrderStatus.Confirmed,
   OrderStatus.Preparing,
   OrderStatus.ReadyForPickup,
+  OrderStatus.OutForDelivery,
+  OrderStatus.Delivered,
   OrderStatus.Cancelled,
 ];
 
 @Injectable()
 export class EnterpriseOrdersService {
   constructor(private readonly prisma: PrismaService) {}
+
+  private parseDeliveryMethod(body: { deliveryMethod?: unknown }): 'SelfDelivery' | 'ThirdParty' {
+    const raw = body?.deliveryMethod;
+    if (typeof raw !== 'string') {
+      throw new BadRequestException('deliveryMethod is required');
+    }
+    const v = raw.trim();
+    if (v !== 'SelfDelivery' && v !== 'ThirdParty') {
+      throw new BadRequestException(`Invalid deliveryMethod: ${raw}`);
+    }
+    return v;
+  }
 
   private async getEnterpriseIdByAccountId(accountId: string): Promise<string> {
     const enterprise = await this.prisma.enterprise.findUnique({
@@ -138,6 +153,7 @@ export class EnterpriseOrdersService {
           imageUrl: d.food.ImageURL ?? null,
         })),
         estimatedDeliveryTime: order.EstimatedDeliveryTime?.toISOString() ?? null,
+        metadata: order.Metadata ?? null,
         paymentId: latest?.PaymentID ?? null,
         paymentStatus: latest?.PaymentStatus ?? null,
         paymentMethod: latest?.PaymentMethod ?? null,
@@ -362,6 +378,9 @@ export class EnterpriseOrdersService {
       }
 
       const data: Prisma.OrderUpdateInput = { Status: target };
+      if (target === ORDER_STATUS.Delivered) {
+        data.DeliveredAt = new Date();
+      }
       if (target === ORDER_STATUS.Cancelled) {
         await tx.payment.updateMany({
           where: {
@@ -388,6 +407,60 @@ export class EnterpriseOrdersService {
       status: result.status,
       unchanged: result.unchanged,
     };
+  }
+
+  /**
+   * Enterprise sets delivery method (stored in Order.Metadata) while order is in Confirmed/Preparing.
+   */
+  async updateDeliveryMethod(
+    accountId: string,
+    orderId: string,
+    body: { deliveryMethod?: unknown },
+  ) {
+    if (!orderId?.trim()) {
+      throw new BadRequestException('Order id is required');
+    }
+    const deliveryMethod = this.parseDeliveryMethod(body);
+    const enterpriseId = await this.getEnterpriseIdByAccountId(accountId);
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const order = await tx.order.findFirst({
+        where: {
+          OrderID: orderId,
+          orderDetails: { some: { food: { EnterpriseID: enterpriseId } } },
+        },
+        select: { OrderID: true, Status: true, Metadata: true },
+      });
+
+      if (!order) {
+        throw new NotFoundException('Order not found or access denied');
+      }
+
+      const allowedStatuses: OrderStatus[] = [OrderStatus.Confirmed, OrderStatus.Preparing];
+      if (!allowedStatuses.includes(order.Status)) {
+        throw new ConflictException(
+          `Cannot set delivery method when status is ${order.Status}. Allowed: Confirmed, Preparing`,
+        );
+      }
+
+      const base =
+        order.Metadata && typeof order.Metadata === 'object' && !Array.isArray(order.Metadata)
+          ? (order.Metadata as Record<string, unknown>)
+          : {};
+
+      const next = { ...base, deliveryMethod };
+
+      await tx.order.update({
+        where: { OrderID: orderId },
+        data: { Metadata: next },
+      });
+
+      return { orderId: order.OrderID, deliveryMethod };
+    });
+
+    await this.invalidateEnterpriseCaches(enterpriseId);
+
+    return { success: true, ...updated };
   }
 
   /**
