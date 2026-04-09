@@ -1,7 +1,25 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
-import { OrdersRepository, OrderListCriteria } from '@infra/repositories/orders.repository';
+import {
+  Injectable,
+  BadRequestException,
+  NotFoundException,
+} from '@nestjs/common';
+import {
+  OrdersRepository,
+  OrderListCriteria,
+} from '@infra/repositories/orders.repository';
 import { CustomersService } from '@modules/customers/customers.service';
 import { PAYMENT_METHOD } from '@common/constants/payment-method.constants';
+
+type FoodWithImageURL = {
+  ImageURL?: string | null;
+};
+
+function getFoodImageUrl(food: unknown): string | null {
+  if (!food || typeof food !== 'object') return null;
+  if (!('ImageURL' in food)) return null;
+  const imageUrl = (food as FoodWithImageURL).ImageURL;
+  return typeof imageUrl === 'string' ? imageUrl : null;
+}
 
 export interface OrderItemDto {
   id: string;
@@ -10,14 +28,18 @@ export interface OrderItemDto {
   foodName: string;
   quantity: number;
   price: number;
+  imageUrl?: string | null;
   specialInstructions?: string;
 }
 
 export interface OrderDto {
   id: string;
   customerId: string;
+  recipientName?: string | null;
+  recipientPhone?: string | null;
   restaurantId: string;
   restaurantName: string;
+  restaurantAvatarUrl?: string | null;
   items: OrderItemDto[];
   totalAmount: number;
   status: string;
@@ -64,13 +86,16 @@ export class OrdersService {
     private readonly customersService: CustomersService,
   ) {}
 
-  async listForCustomer(accountId: string, params: {
-    status?: string;
-    page?: number;
-    limit?: number;
-    startDate?: string;
-    endDate?: string;
-  }): Promise<OrdersListResponse> {
+  async listForCustomer(
+    accountId: string,
+    params: {
+      status?: string;
+      page?: number;
+      limit?: number;
+      startDate?: string;
+      endDate?: string;
+    },
+  ): Promise<OrdersListResponse> {
     const customer = await this.customersService.getByAccountId(accountId);
     if (!customer) {
       throw new NotFoundException('Customer not found');
@@ -85,12 +110,16 @@ export class OrdersService {
       endDate: params.endDate ? new Date(params.endDate) : undefined,
     };
 
-    const { rows, total, page, limit } = await this.repo.findManyForCustomer(criteria);
+    const { rows, total, page, limit } =
+      await this.repo.findManyForCustomer(criteria);
 
     const orders = rows.map((order) => {
       const firstDetail = order.orderDetails[0];
-      const restaurantName = firstDetail?.food?.enterprise?.EnterpriseName ?? 'Unknown Restaurant';
+      const restaurantName =
+        firstDetail?.food?.enterprise?.EnterpriseName ?? 'Unknown Restaurant';
       const restaurantId = firstDetail?.food?.EnterpriseID ?? '';
+      const restaurantAvatarUrl =
+        firstDetail?.food?.enterprise?.account?.Avatar ?? null;
 
       const items: OrderItemDto[] = order.orderDetails.map((detail) => ({
         id: detail.OrderDetailID,
@@ -99,14 +128,18 @@ export class OrdersService {
         foodName: detail.food.DishName,
         quantity: detail.Quantity,
         price: Number(detail.SubTotal),
+        imageUrl: getFoodImageUrl(detail.food),
         specialInstructions: undefined,
       }));
 
       return {
         id: order.OrderID,
         customerId: order.CustomerID,
+        recipientName: customer.FullName,
+        recipientPhone: customer.PhoneNumber,
         restaurantId,
         restaurantName,
+        restaurantAvatarUrl,
         items,
         totalAmount: Number(order.TotalAmount),
         status: String(order.Status).toLowerCase(),
@@ -122,7 +155,10 @@ export class OrdersService {
     return { orders, total, page, limit };
   }
 
-  async getByIdForCustomer(accountId: string, orderId: string): Promise<OrderDto> {
+  async getByIdForCustomer(
+    accountId: string,
+    orderId: string,
+  ): Promise<OrderDto> {
     const customer = await this.customersService.getByAccountId(accountId);
     if (!customer) {
       throw new NotFoundException('Customer not found');
@@ -136,6 +172,8 @@ export class OrdersService {
     const firstDetail = order.orderDetails[0];
     const restaurantId = firstDetail?.food.enterprise.EnterpriseID || '';
     const restaurantName = firstDetail?.food.enterprise.EnterpriseName || '';
+    const restaurantAvatarUrl =
+      firstDetail?.food.enterprise.account?.Avatar ?? null;
     const items: OrderItemDto[] = order.orderDetails.map((od) => ({
       id: od.OrderDetailID,
       orderId: od.OrderID,
@@ -143,27 +181,35 @@ export class OrdersService {
       foodName: od.food.DishName,
       quantity: od.Quantity,
       price: Number(od.food.Price),
+      imageUrl: getFoodImageUrl(od.food),
       specialInstructions: od.food.Description || undefined,
     }));
 
     return {
       id: order.OrderID,
       customerId: order.CustomerID,
+      recipientName: customer.FullName,
+      recipientPhone: customer.PhoneNumber,
       restaurantId,
       restaurantName,
+      restaurantAvatarUrl,
       items,
       totalAmount: Number(order.TotalAmount),
       status: String(order.Status).toLowerCase(),
       deliveryAddress: order.DeliveryAddress,
       deliveryInstructions: order.DeliveryNote || undefined,
-      paymentMethod: order.payments[0]?.PaymentMethod || PAYMENT_METHOD.CreditCard,
+      paymentMethod:
+        order.payments[0]?.PaymentMethod || PAYMENT_METHOD.CreditCard,
       createdAt: order.OrderDate.toISOString(),
       updatedAt: new Date().toISOString(),
       estimatedDeliveryTime: order.EstimatedDeliveryTime?.toISOString(),
     };
   }
 
-  async cancelForCustomer(accountId: string, orderId: string): Promise<{ success: true }> {
+  async cancelForCustomer(
+    accountId: string,
+    orderId: string,
+  ): Promise<{ success: true }> {
     const customer = await this.customersService.getByAccountId(accountId);
     if (!customer) {
       throw new NotFoundException('Customer not found');
@@ -182,7 +228,10 @@ export class OrdersService {
     return { success: true };
   }
 
-  async trackForCustomer(accountId: string, orderId: string): Promise<{
+  async trackForCustomer(
+    accountId: string,
+    orderId: string,
+  ): Promise<{
     status: string;
     estimatedDeliveryTime?: string | null;
     trackingInfo?: {
@@ -224,7 +273,10 @@ export class OrdersService {
     };
   }
 
-  async reorderForCustomer(accountId: string, orderId: string): Promise<{ success: boolean; message: string }> {
+  async reorderForCustomer(
+    accountId: string,
+    orderId: string,
+  ): Promise<{ success: boolean; message: string }> {
     const customer = await this.customersService.getByAccountId(accountId);
     if (!customer) {
       throw new NotFoundException('Customer not found');
@@ -268,10 +320,13 @@ export class OrdersService {
   ): Promise<{ orderId: string; total: number }> {
     const customer = await this.customersService.getByAccountId(accountId);
     if (!customer) {
-      throw new NotFoundException('Customer profile not found. Please login to place an order.');
+      throw new NotFoundException(
+        'Customer profile not found. Please login to place an order.',
+      );
     }
 
-    const { cartItems, deliveryInfo, voucherCode, paymentIntentId } = body ?? {};
+    const { cartItems, deliveryInfo, voucherCode, paymentIntentId } =
+      body ?? {};
     if (!Array.isArray(cartItems) || cartItems.length === 0) {
       throw new BadRequestException('Cart is empty');
     }
@@ -279,7 +334,8 @@ export class OrdersService {
     await this.repo.validateFoodsAvailability(cartItems);
 
     const subtotal = cartItems.reduce(
-      (sum: number, item: OrderCartItemDto) => sum + item.menuItem.price * item.quantity,
+      (sum: number, item: OrderCartItemDto) =>
+        sum + item.menuItem.price * item.quantity,
       0,
     );
     const deliveryFee = 0.5;
@@ -308,4 +364,3 @@ export class OrdersService {
     };
   }
 }
-
