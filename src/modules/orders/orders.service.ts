@@ -10,14 +10,18 @@ export interface OrderItemDto {
   foodName: string;
   quantity: number;
   price: number;
+  imageUrl?: string | null;
   specialInstructions?: string;
 }
 
 export interface OrderDto {
   id: string;
   customerId: string;
+  recipientName?: string | null;
+  recipientPhone?: string | null;
   restaurantId: string;
   restaurantName: string;
+  restaurantAvatarUrl?: string | null;
   items: OrderItemDto[];
   totalAmount: number;
   status: string;
@@ -91,6 +95,7 @@ export class OrdersService {
       const firstDetail = order.orderDetails[0];
       const restaurantName = firstDetail?.food?.enterprise?.EnterpriseName ?? 'Unknown Restaurant';
       const restaurantId = firstDetail?.food?.EnterpriseID ?? '';
+      const restaurantAvatarUrl = firstDetail?.food?.enterprise?.account?.Avatar ?? null;
 
       const items: OrderItemDto[] = order.orderDetails.map((detail) => ({
         id: detail.OrderDetailID,
@@ -99,14 +104,18 @@ export class OrdersService {
         foodName: detail.food.DishName,
         quantity: detail.Quantity,
         price: Number(detail.SubTotal),
+        imageUrl: (detail.food as any)?.ImageURL ?? null,
         specialInstructions: undefined,
       }));
 
       return {
         id: order.OrderID,
         customerId: order.CustomerID,
+        recipientName: customer.FullName,
+        recipientPhone: customer.PhoneNumber,
         restaurantId,
         restaurantName,
+        restaurantAvatarUrl,
         items,
         totalAmount: Number(order.TotalAmount),
         status: String(order.Status).toLowerCase(),
@@ -136,6 +145,7 @@ export class OrdersService {
     const firstDetail = order.orderDetails[0];
     const restaurantId = firstDetail?.food.enterprise.EnterpriseID || '';
     const restaurantName = firstDetail?.food.enterprise.EnterpriseName || '';
+    const restaurantAvatarUrl = firstDetail?.food.enterprise.account?.Avatar ?? null;
     const items: OrderItemDto[] = order.orderDetails.map((od) => ({
       id: od.OrderDetailID,
       orderId: od.OrderID,
@@ -143,14 +153,18 @@ export class OrdersService {
       foodName: od.food.DishName,
       quantity: od.Quantity,
       price: Number(od.food.Price),
+      imageUrl: (od.food as any)?.ImageURL ?? null,
       specialInstructions: od.food.Description || undefined,
     }));
 
     return {
       id: order.OrderID,
       customerId: order.CustomerID,
+      recipientName: customer.FullName,
+      recipientPhone: customer.PhoneNumber,
       restaurantId,
       restaurantName,
+      restaurantAvatarUrl,
       items,
       totalAmount: Number(order.TotalAmount),
       status: String(order.Status).toLowerCase(),

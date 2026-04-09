@@ -79,10 +79,12 @@ export class OrdersRepository {
                   FoodID: true,
                   DishName: true,
                   Price: true,
+                  ImageURL: true,
                   EnterpriseID: true,
                   enterprise: {
                     select: {
                       EnterpriseName: true,
+                      account: { select: { Avatar: true } },
                     },
                   },
                 },
@@ -113,7 +115,7 @@ export class OrdersRepository {
           include: {
             food: {
               include: {
-                enterprise: { select: { EnterpriseID: true, EnterpriseName: true } },
+                enterprise: { select: { EnterpriseID: true, EnterpriseName: true, account: { select: { Avatar: true } } } },
               },
             },
           },
