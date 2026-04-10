@@ -34,6 +34,7 @@ import { AdminRoleGuard, JwtAuthGuard } from '@common/guards';
     AuthService,
     AuthPasswordService,
     AuthGoogleService,
+    AuthEmailService,
     AuthRepository,
     JwtAuthGuard,
     AdminRoleGuard,

@@ -46,6 +46,7 @@ model Account {
   authTokens  AuthToken[]
   driver      DeliveryDriver?
   passwordResetTokens PasswordResetToken[]
+  enterpriseInvitations EnterpriseInvitation[]
   auditLogs   AuditLog[]
 
   @@index([RoleID])
@@ -57,6 +58,18 @@ model Account {
   @@index([ProviderAccountId])
   @@index([EmailVerified])
   @@map("ACCOUNT")
+}
+
+model AppSetting {
+  SettingID String   @id @default(uuid()) @db.VarChar(36)
+  Key       String   @unique @db.VarChar(120)
+  Value     Json
+  UpdatedAt DateTime @updatedAt
+  CreatedAt DateTime @default(now())
+
+  @@index([Key])
+  @@index([UpdatedAt])
+  @@map("APP_SETTING")
 }
 
 model Customer {
@@ -77,6 +90,36 @@ model Customer {
 
   @@index([PreferredPaymentMethod])
   @@map("CUSTOMER")
+}
+
+enum EnterpriseInvitationStatus {
+  Pending
+  Accepted
+  Expired
+  Revoked
+}
+
+model EnterpriseInvitation {
+  InvitationID String                     @id @default(uuid()) @db.VarChar(36)
+  AccountID    String                     @db.VarChar(36)
+  Email        String                     @db.VarChar(100)
+  PhoneNumber  String                     @db.VarChar(15)
+  EnterpriseNameDraft String?             @db.VarChar(100)
+  TokenHash    String                     @db.VarChar(255)
+  ExpiresAt    DateTime
+  Status       EnterpriseInvitationStatus @default(Pending)
+  AcceptedAt   DateTime?
+  CreatedAt    DateTime                   @default(now())
+  UpdatedAt    DateTime                   @updatedAt
+
+  account Account @relation(fields: [AccountID], references: [AccountID], onDelete: Cascade)
+
+  @@index([AccountID])
+  @@index([Email])
+  @@index([PhoneNumber])
+  @@index([ExpiresAt])
+  @@index([Status])
+  @@map("ENTERPRISE_INVITATION")
 }
 
 model Enterprise {

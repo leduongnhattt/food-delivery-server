@@ -29,6 +29,12 @@ export class AdminEnterprisesController {
     return this.adminEnterprisesService.listEnterprises(q);
   }
 
+  @Get(':enterpriseId')
+  @UseGuards(JwtAuthGuard, AdminRoleGuard)
+  detail(@Param('enterpriseId') enterpriseId: string) {
+    return this.adminEnterprisesService.getEnterpriseDetail(enterpriseId);
+  }
+
   @Post()
   @UseGuards(JwtAuthGuard, AdminRoleGuard)
   create(@Body() body: CreateEnterpriseBody) {

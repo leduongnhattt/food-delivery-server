@@ -23,9 +23,10 @@ import { VouchersModule } from '@modules/vouchers/vouchers.module';
 import { EnterpriseLocalUploadController } from '@modules/enterprise/upload/enterprise-local-upload.controller';
 import { EnterpriseReviewsController } from '@modules/enterprise/reviews/enterprise-reviews.controller';
 import { ReviewsModule } from '@modules/reviews/reviews.module';
+import { EnterpriseActivationModule } from '@modules/enterprise/activation/enterprise-activation.module';
 
 @Module({
-  imports: [AuthModule, VouchersModule, ReviewsModule],
+  imports: [AuthModule, VouchersModule, ReviewsModule, EnterpriseActivationModule],
   controllers: [
     EnterpriseAvatarController,
     EnterpriseCategoryController,
