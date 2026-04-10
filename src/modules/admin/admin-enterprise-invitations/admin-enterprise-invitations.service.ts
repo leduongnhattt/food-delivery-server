@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, AccountStatus } from '@prisma/client';
+import { Prisma, AccountStatus, EnterpriseInvitationStatus } from '@prisma/client';
 import { PrismaService } from '@infra/prisma/prisma.service';
 import { AuthRepository } from '@infra/repositories/auth.repository';
 import { AuthPasswordService } from '@modules/auth/password/password.service';
@@ -290,7 +290,9 @@ export class AdminEnterpriseInvitationsService {
 
     const where: Prisma.EnterpriseInvitationWhereInput = {};
     if (status !== 'all') {
-      where.Status = statusRaw.charAt(0).toUpperCase() + statusRaw.slice(1) as any;
+      const normalized =
+        (statusRaw.charAt(0).toUpperCase() + statusRaw.slice(1)) as EnterpriseInvitationStatus;
+      where.Status = normalized;
     }
     if (q) {
       where.OR = [

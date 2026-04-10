@@ -47,7 +47,7 @@ export class EnterpriseInvitationCleanupJob {
           await tx.account.delete({ where: { AccountID: inv.AccountID } });
         });
         deleted++;
-      } catch (e) {
+      } catch {
         this.logger.warn(
           `Failed to cleanup invitation ${inv.InvitationID} (${inv.Email})`,
         );

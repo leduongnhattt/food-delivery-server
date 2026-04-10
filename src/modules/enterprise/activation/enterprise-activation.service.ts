@@ -11,8 +11,6 @@ import { AuthEmailService } from '@modules/auth/auth-email.service';
 import { AuthRepository } from '@infra/repositories/auth.repository';
 import * as crypto from 'crypto';
 
-const INVITE_TOKEN_BYTES = 32;
-
 function sha256Hex(s: string): string {
   return crypto.createHash('sha256').update(s).digest('hex');
 }
@@ -221,8 +219,8 @@ export class EnterpriseActivationService {
             AccountID: inv.AccountID,
             EnterpriseName: name,
             Address: address,
-            Latitude: latitude as any,
-            Longitude: longitude as any,
+            Latitude: latitude,
+            Longitude: longitude,
             PhoneNumber: inv.PhoneNumber,
             Description: description ?? null,
             OpenHours: openHours,
