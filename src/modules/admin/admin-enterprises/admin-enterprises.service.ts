@@ -188,4 +188,180 @@ export class AdminEnterprisesService {
     });
     return { success: true };
   }
+
+  private maskAccountTail(accountNumber: string | null | undefined): string {
+    const s = (accountNumber ?? '').replace(/\s+/g, '');
+    if (!s) return '—';
+    const tail = s.slice(-4);
+    return tail.length ? `****${tail}` : '—';
+  }
+
+  /**
+   * Admin detail view: enterprise profile, payout hints, aggregates, and linked foods.
+   */
+  async getEnterpriseDetail(enterpriseId: string) {
+    const enterprise = await this.prisma.enterprise.findFirst({
+      where: { EnterpriseID: enterpriseId, DeletedAt: null },
+      include: {
+        account: {
+          select: {
+            AccountID: true,
+            Email: true,
+            Username: true,
+            Status: true,
+            CreatedAt: true,
+          },
+        },
+        payoutSettings: {
+          include: {
+            preferredDestination: true,
+          },
+        },
+        payoutDestinations: {
+          where: { IsActive: true },
+          orderBy: [{ IsDefault: 'desc' }, { CreatedAt: 'desc' }],
+          take: 5,
+        },
+      },
+    });
+
+    if (!enterprise) {
+      throw new NotFoundException('Enterprise not found');
+    }
+
+    const pendingInvitation = await this.prisma.enterpriseInvitation.findFirst({
+      where: {
+        AccountID: enterprise.account.AccountID,
+        Status: 'Pending',
+      },
+      select: { InvitationID: true },
+    });
+    const hasPendingInvitation = !!pendingInvitation;
+
+    const preferred =
+      enterprise.payoutSettings?.preferredDestination ??
+      enterprise.payoutDestinations.find((d) => d.IsDefault) ??
+      enterprise.payoutDestinations[0];
+
+    const bankAccountMasked = preferred
+      ? preferred.Kind === 'BankAccount'
+        ? this.maskAccountTail(preferred.AccountNumber)
+        : preferred.WalletDisplayName || preferred.WalletRef || '—'
+      : '—';
+
+    const payoutMethod = preferred ? String(preferred.Kind) : '—';
+
+    const [
+      productCount,
+      revenueAgg,
+      orderDistinct,
+      reviewAgg,
+      refundedOrderGroups,
+      cancelledOrderGroups,
+      foods,
+      categorySample,
+    ] = await Promise.all([
+      this.prisma.food.count({ where: { EnterpriseID: enterpriseId } }),
+      this.prisma.orderDetail.aggregate({
+        where: { food: { EnterpriseID: enterpriseId } },
+        _sum: { SubTotal: true },
+      }),
+      this.prisma.orderDetail.groupBy({
+        by: ['OrderID'],
+        where: { food: { EnterpriseID: enterpriseId } },
+      }),
+      this.prisma.review.aggregate({
+        where: {
+          EnterpriseID: enterpriseId,
+          IsHidden: false,
+          Rating: { not: null },
+        },
+        _avg: { Rating: true },
+        _count: { ReviewID: true },
+      }),
+      this.prisma.orderDetail.groupBy({
+        by: ['OrderID'],
+        where: {
+          food: { EnterpriseID: enterpriseId },
+          order: { Status: 'Refunded' },
+        },
+      }),
+      this.prisma.orderDetail.groupBy({
+        by: ['OrderID'],
+        where: {
+          food: { EnterpriseID: enterpriseId },
+          order: { Status: 'Cancelled' },
+        },
+      }),
+      this.prisma.food.findMany({
+        where: { EnterpriseID: enterpriseId },
+        orderBy: { CreatedAt: 'desc' },
+        take: 50,
+        select: {
+          FoodID: true,
+          DishName: true,
+          Price: true,
+          IsAvailable: true,
+          ImageURL: true,
+          foodCategory: { select: { CategoryName: true } },
+        },
+      }),
+      this.prisma.food.findFirst({
+        where: { EnterpriseID: enterpriseId },
+        select: { foodCategory: { select: { CategoryName: true } } },
+      }),
+    ]);
+
+    const totalOrders = orderDistinct.length;
+    const totalRevenue = revenueAgg._sum.SubTotal ?? 0;
+    const totalReturns = refundedOrderGroups.length;
+    const cancellationRatePercent =
+      totalOrders > 0
+        ? Math.round((cancelledOrderGroups.length / totalOrders) * 100)
+        : 0;
+    const satisfactionRatingAvg = reviewAgg._avg.Rating;
+    const reviewCount = reviewAgg._count.ReviewID;
+
+    return {
+      enterprise: {
+        EnterpriseID: enterprise.EnterpriseID,
+        EnterpriseName: enterprise.EnterpriseName,
+        PhoneNumber: enterprise.PhoneNumber,
+        Address: enterprise.Address,
+        OpenHours: enterprise.OpenHours,
+        CloseHours: enterprise.CloseHours,
+        Description: enterprise.Description,
+        Latitude: enterprise.Latitude,
+        Longitude: enterprise.Longitude,
+        CreatedAt: enterprise.CreatedAt,
+        account: enterprise.account,
+      },
+      business: {
+        legalBusinessName: null as string | null,
+        registrationNumber: null as string | null,
+        taxId: null as string | null,
+        bankAccountMasked,
+        payoutMethod,
+      },
+      stats: {
+        totalProducts: productCount,
+        totalRevenue,
+        totalOrders,
+        totalReturns,
+        cancellationRatePercent,
+        satisfactionRatingAvg,
+        reviewCount,
+      },
+      linkedProducts: foods.map((f) => ({
+        FoodID: f.FoodID,
+        DishName: f.DishName,
+        Price: f.Price,
+        IsAvailable: f.IsAvailable,
+        ImageURL: f.ImageURL,
+        CategoryName: f.foodCategory?.CategoryName ?? null,
+      })),
+      primaryCategoryName: categorySample?.foodCategory?.CategoryName ?? null,
+      hasPendingInvitation,
+    };
+  }
 }
