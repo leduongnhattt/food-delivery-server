@@ -344,16 +344,16 @@ export class AdminEnterpriseInvitationsService {
       invitationIds.length === 0
         ? new Set<string>()
         : new Set(
-            (
-              await this.prisma.enterpriseInvitationEngagementEvent.findMany({
-                where: {
-                  InvitationID: { in: invitationIds },
-                  Type: 'LinkClick',
-                },
-                select: { InvitationID: true },
-              })
-            ).map((r) => r.InvitationID),
-          );
+          (
+            await this.prisma.enterpriseInvitationEngagementEvent.findMany({
+              where: {
+                InvitationID: { in: invitationIds },
+                Type: 'LinkClick',
+              },
+              select: { InvitationID: true },
+            })
+          ).map((r) => r.InvitationID),
+        );
     return {
       items: items.map((row) => ({
         ...row,

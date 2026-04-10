@@ -20,7 +20,7 @@ import {
 export class AdminEnterprisesController {
   constructor(
     private readonly adminEnterprisesService: AdminEnterprisesService,
-  ) {}
+  ) { }
 
   @Get()
   @UseGuards(JwtAuthGuard, AdminRoleGuard)

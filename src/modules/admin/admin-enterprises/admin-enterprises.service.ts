@@ -47,7 +47,7 @@ export class AdminEnterprisesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly authService: AuthService,
-  ) {}
+  ) { }
 
   private buildWhere(
     statusParam: AdminEnterpriseListStatus,
@@ -107,12 +107,12 @@ export class AdminEnterprisesService {
       accountIds.length === 0
         ? []
         : await this.prisma.enterpriseInvitation.findMany({
-            where: {
-              AccountID: { in: accountIds },
-              Status: EnterpriseInvitationStatus.Pending,
-            },
-            select: { AccountID: true },
-          });
+          where: {
+            AccountID: { in: accountIds },
+            Status: EnterpriseInvitationStatus.Pending,
+          },
+          select: { AccountID: true },
+        });
     const pendingAccountIds = new Set(pendingRows.map((r) => r.AccountID));
     return {
       items: items.map((row) => ({
