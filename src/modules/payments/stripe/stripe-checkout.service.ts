@@ -202,8 +202,11 @@ export class StripeCheckoutService {
         let computedCommissionFee = 0;
         const firstRestaurantId = cartItems[0]?.menuItem?.restaurantId;
         if (firstRestaurantId) {
-            const enterprise = await this.prisma.enterprise.findUnique({
-                where: { EnterpriseID: firstRestaurantId },
+            const enterprise = await this.prisma.enterprise.findFirst({
+                where: {
+                    EnterpriseID: firstRestaurantId,
+                    DeletedAt: null,
+                },
                 select: { CommissionRate: true },
             });
             const commissionRate = Number(enterprise?.CommissionRate ?? 0);

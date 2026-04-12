@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { AccountStatus } from '@prisma/client';
+import { AccountStatus, EnterpriseInvitationStatus } from '@prisma/client';
 import { AuthRepository } from '@infra/repositories/auth.repository';
 import { AuthPasswordService } from '@modules/auth/password/password.service';
 import type { Secret, SignOptions } from 'jsonwebtoken';
@@ -49,6 +49,63 @@ export class AuthService {
 
   async findAccountByUsername(username: string) {
     return this.authRepo.findAccountByUsername(username);
+  }
+
+  getEnterpriseLoginBlockReason(accountId: string): Promise<{
+    message: string;
+    code: string;
+  } | null> {
+    return this.enterpriseLoginGate(accountId);
+  }
+
+  private async enterpriseLoginGate(accountId: string): Promise<{
+    message: string;
+    code: string;
+  } | null> {
+    const noAccountError = {
+      message: 'No account was found for these credentials.',
+      code: 'ENTERPRISE_NO_ACCOUNT',
+    } as const;
+    const suspendedAccountError = {
+      message:
+        'This enterprise account has been suspended. Please contact support.',
+      code: 'ENTERPRISE_SUSPENDED',
+    } as const;
+
+    const loginContext =
+      await this.authRepo.findEnterpriseLoginContext(accountId);
+    if (!loginContext) {
+      return { ...noAccountError };
+    }
+
+    const enterprise = loginContext.enterprise;
+    const latestInvitation = loginContext.enterpriseInvitations[0];
+
+    if (enterprise?.DeletedAt) {
+      return { ...noAccountError, code: 'ENTERPRISE_DELETED' };
+    }
+
+    if (enterprise) {
+      if (
+        latestInvitation &&
+        latestInvitation.Status !== EnterpriseInvitationStatus.Accepted
+      ) {
+        return { ...noAccountError, code: 'ENTERPRISE_NOT_ACTIVATED' };
+      }
+      if (loginContext.Status === AccountStatus.Inactive) {
+        return { ...suspendedAccountError };
+      }
+      return null;
+    }
+
+    if (
+      !latestInvitation ||
+      latestInvitation.Status !== EnterpriseInvitationStatus.Accepted
+    ) {
+      return { ...noAccountError, code: 'ENTERPRISE_NOT_ACTIVATED' };
+    }
+
+    return { ...noAccountError, code: 'ENTERPRISE_NOT_ACTIVATED' };
   }
 
   async createAccount(params: {

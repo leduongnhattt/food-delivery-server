@@ -136,8 +136,8 @@ export class MenuItemsRepository {
   findEnterpriseById(
     enterpriseId: string,
   ): Promise<{ EnterpriseID: string } | null> {
-    return this.prisma.enterprise.findUnique({
-      where: { EnterpriseID: enterpriseId },
+    return this.prisma.enterprise.findFirst({
+      where: { EnterpriseID: enterpriseId, DeletedAt: null },
       select: { EnterpriseID: true },
     });
   }
