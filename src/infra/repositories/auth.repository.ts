@@ -42,6 +42,30 @@ export class AuthRepository {
     });
   }
 
+  /**
+   * Enterprise login gate: Account.Status, Enterprise.DeletedAt (soft delete),
+   * latest EnterpriseInvitation.Status (Pending | Accepted | Expired | Revoked).
+   */
+  findEnterpriseLoginContext(accountId: string) {
+    return this.prisma.account.findUnique({
+      where: { AccountID: accountId },
+      select: {
+        Status: true,
+        enterprise: {
+          select: {
+            EnterpriseID: true,
+            DeletedAt: true,
+          },
+        },
+        enterpriseInvitations: {
+          orderBy: { CreatedAt: 'desc' },
+          take: 1,
+          select: { Status: true },
+        },
+      },
+    });
+  }
+
   findAccountByEmail(email: string, withRole = false) {
     return this.prisma.account.findFirst({
       where: { Email: email },

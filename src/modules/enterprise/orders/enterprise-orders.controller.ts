@@ -61,6 +61,17 @@ export class EnterpriseOrdersController {
     return this.service.updateStatus(account.accountId, id, body);
   }
 
+  @Patch(':id/delivery-method')
+  @UseGuards(JwtAuthGuard)
+  async updateDeliveryMethod(
+    @CurrentAccount() account: JwtPayload | null,
+    @Param('id') id: string,
+    @Body() body: { deliveryMethod?: unknown },
+  ) {
+    this.assertEnterprise(account);
+    return this.service.updateDeliveryMethod(account.accountId, id, body);
+  }
+
   @Delete(':id')
   @UseGuards(JwtAuthGuard)
   async delete(

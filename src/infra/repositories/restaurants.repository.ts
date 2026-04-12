@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { AccountStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '@infra/prisma/prisma.service';
 
 const DEFAULT_PAGE_SIZE = 10;
@@ -34,6 +34,8 @@ export class RestaurantsRepository {
     criteria: RestaurantListCriteria,
   ): Prisma.EnterpriseWhereInput {
     const where: Prisma.EnterpriseWhereInput = {
+      DeletedAt: null,
+      account: { is: { Status: AccountStatus.Active } },
       IsActive: criteria.isOpen !== undefined ? criteria.isOpen : true,
     };
     if (criteria.search) {
@@ -111,8 +113,13 @@ export class RestaurantsRepository {
   }
 
   async findById(enterpriseId: string) {
-    return this.prisma.enterprise.findUnique({
-      where: { EnterpriseID: enterpriseId },
+    return this.prisma.enterprise.findFirst({
+      where: {
+        EnterpriseID: enterpriseId,
+        DeletedAt: null,
+        IsActive: true,
+        account: { is: { Status: AccountStatus.Active } },
+      },
       include: {
         account: { select: { Avatar: true } },
         foods: {
@@ -173,8 +180,8 @@ export class RestaurantsRepository {
   }
 
   async getCommissionRate(enterpriseId: string): Promise<number | null> {
-    const e = await this.prisma.enterprise.findUnique({
-      where: { EnterpriseID: enterpriseId },
+    const e = await this.prisma.enterprise.findFirst({
+      where: { EnterpriseID: enterpriseId, DeletedAt: null },
       select: { CommissionRate: true },
     });
     return e?.CommissionRate != null ? Number(e.CommissionRate) : null;
@@ -223,8 +230,13 @@ export class RestaurantsRepository {
   }
 
   async ensureEnterpriseExists(enterpriseId: string): Promise<boolean> {
-    const e = await this.prisma.enterprise.findUnique({
-      where: { EnterpriseID: enterpriseId },
+    const e = await this.prisma.enterprise.findFirst({
+      where: {
+        EnterpriseID: enterpriseId,
+        DeletedAt: null,
+        IsActive: true,
+        account: { is: { Status: AccountStatus.Active } },
+      },
       select: { EnterpriseID: true },
     });
     return !!e;

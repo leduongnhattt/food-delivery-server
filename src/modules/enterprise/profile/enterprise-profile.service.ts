@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -15,11 +16,14 @@ export interface UpdateEnterpriseProfileDto {
   Description?: string | null;
   OpenHours?: string | null;
   CloseHours?: string | null;
+  Email?: string | null;
 }
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 @Injectable()
 export class EnterpriseProfileService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) { }
 
   async getProfile(accountId: string, include: EnterpriseProfileInclude) {
     const baseSelect = {
@@ -80,8 +84,8 @@ export class EnterpriseProfileService {
       } satisfies Prisma.VoucherFindManyArgs;
     }
 
-    const enterprise = await this.prisma.enterprise.findUnique({
-      where: { AccountID: accountId },
+    const enterprise = await this.prisma.enterprise.findFirst({
+      where: { AccountID: accountId, DeletedAt: null },
       select,
     });
 
@@ -98,46 +102,105 @@ export class EnterpriseProfileService {
       throw new BadRequestException('Enterprise name is required');
     }
 
-    const exists = await this.prisma.enterprise.findUnique({
-      where: { AccountID: accountId },
+    const exists = await this.prisma.enterprise.findFirst({
+      where: { AccountID: accountId, DeletedAt: null },
       select: { EnterpriseID: true },
     });
     if (!exists) {
       throw new NotFoundException('Enterprise profile not found');
     }
 
-    const enterprise = await this.prisma.enterprise.update({
-      where: { AccountID: accountId },
-      data: {
-        EnterpriseName: name,
-        Address: dto.Address?.trim() || undefined,
-        PhoneNumber: dto.PhoneNumber?.trim() || undefined,
-        Description: dto.Description?.trim() || undefined,
-        OpenHours: dto.OpenHours?.trim() || undefined,
-        CloseHours: dto.CloseHours?.trim() || undefined,
-        UpdatedAt: new Date(),
-      },
-      select: {
-        EnterpriseID: true,
-        EnterpriseName: true,
-        Address: true,
-        PhoneNumber: true,
-        Description: true,
-        OpenHours: true,
-        CloseHours: true,
-        account: {
-          select: {
-            Email: true,
-            Avatar: true,
-          },
-        },
-      },
-    });
+    let normalizedEmail: string | undefined;
+    if (dto.Email !== undefined && dto.Email !== null) {
+      const trimmed = String(dto.Email).trim();
+      if (!trimmed) {
+        throw new BadRequestException('Email is required');
+      }
+      if (!EMAIL_RE.test(trimmed)) {
+        throw new BadRequestException('Invalid email format');
+      }
+      normalizedEmail = trimmed.toLowerCase();
+    }
 
-    return {
-      message: 'Enterprise profile updated successfully',
-      enterprise,
-    };
+    let emailToPersist: string | undefined;
+    if (normalizedEmail !== undefined) {
+      const current = await this.prisma.account.findUnique({
+        where: { AccountID: accountId },
+        select: { Email: true },
+      });
+      if (!current) {
+        throw new NotFoundException('Account not found');
+      }
+      if (current.Email.toLowerCase() !== normalizedEmail) {
+        const taken = await this.prisma.account.findFirst({
+          where: {
+            Email: normalizedEmail,
+            NOT: { AccountID: accountId },
+          },
+          select: { AccountID: true },
+        });
+        if (taken) {
+          throw new ConflictException('Email is already in use');
+        }
+        emailToPersist = normalizedEmail;
+      }
+    }
+
+    try {
+      const enterprise = await this.prisma.$transaction(async (tx) => {
+        if (emailToPersist !== undefined) {
+          await tx.account.update({
+            where: { AccountID: accountId },
+            data: {
+              Email: emailToPersist,
+              EmailVerified: false,
+              UpdatedAt: new Date(),
+            },
+          });
+        }
+
+        return tx.enterprise.update({
+          where: { AccountID: accountId },
+          data: {
+            EnterpriseName: name,
+            Address: dto.Address?.trim() || undefined,
+            PhoneNumber: dto.PhoneNumber?.trim() || undefined,
+            Description: dto.Description?.trim() || undefined,
+            OpenHours: dto.OpenHours?.trim() || undefined,
+            CloseHours: dto.CloseHours?.trim() || undefined,
+            UpdatedAt: new Date(),
+          },
+          select: {
+            EnterpriseID: true,
+            EnterpriseName: true,
+            Address: true,
+            PhoneNumber: true,
+            Description: true,
+            OpenHours: true,
+            CloseHours: true,
+            account: {
+              select: {
+                Email: true,
+                Avatar: true,
+              },
+            },
+          },
+        });
+      });
+
+      return {
+        message: 'Enterprise profile updated successfully',
+        enterprise,
+      };
+    } catch (err) {
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002'
+      ) {
+        throw new ConflictException('Email is already in use');
+      }
+      throw err;
+    }
   }
 }
 
