@@ -34,8 +34,8 @@ export class EnterpriseDashboardService {
   constructor(private readonly prisma: PrismaService) {}
 
   private async getEnterpriseIdByAccountId(accountId: string): Promise<string> {
-    const enterprise = await this.prisma.enterprise.findUnique({
-      where: { AccountID: accountId },
+    const enterprise = await this.prisma.enterprise.findFirst({
+      where: { AccountID: accountId, DeletedAt: null },
       select: { EnterpriseID: true },
     });
     if (!enterprise) throw new BadRequestException('Enterprise not found');
