@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { AccountStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '@infra/prisma/prisma.service';
 
 /** Default and bounds for pagination. */
@@ -42,6 +42,13 @@ export class FoodsRepository {
     const where: Prisma.FoodWhereInput = {
       IsAvailable:
         criteria.isAvailable !== undefined ? criteria.isAvailable : true,
+      enterprise: {
+        is: {
+          DeletedAt: null,
+          IsActive: true,
+          account: { is: { Status: AccountStatus.Active } },
+        },
+      },
     };
     if (criteria.restaurantId) {
       where.EnterpriseID = criteria.restaurantId;
@@ -147,6 +154,13 @@ export class FoodsRepository {
           },
         ],
         IsAvailable: true,
+        enterprise: {
+          is: {
+            DeletedAt: null,
+            IsActive: true,
+            account: { is: { Status: AccountStatus.Active } },
+          },
+        },
       },
       include: {
         enterprise: {
@@ -174,7 +188,16 @@ export class FoodsRepository {
       return [];
     }
     return this.prisma.food.findMany({
-      where: { FoodID: { in: ids } },
+      where: {
+        FoodID: { in: ids },
+        enterprise: {
+          is: {
+            DeletedAt: null,
+            IsActive: true,
+            account: { is: { Status: AccountStatus.Active } },
+          },
+        },
+      },
       select: {
         FoodID: true,
         DishName: true,

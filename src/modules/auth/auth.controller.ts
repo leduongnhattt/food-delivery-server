@@ -189,12 +189,21 @@ export class AuthController {
       const roleName = roleRecord?.role?.RoleName ?? 'Customer';
 
       const roleLower = (roleName || '').toLowerCase();
-      if (
-        (roleLower === 'customer' || roleLower === 'enterprise') &&
-        account.Status === 'Inactive'
-      ) {
+
+      if (roleLower === 'enterprise') {
+        const block = await this.authService.getEnterpriseLoginBlockReason(
+          account.AccountID,
+        );
+        if (block) {
+          return res.status(403).json({
+            error: block.message,
+            code: block.code,
+          });
+        }
+      } else if (roleLower === 'customer' && account.Status === 'Inactive') {
         return res.status(403).json({
           error: 'Your account is locked. Please contact support.',
+          code: 'ACCOUNT_LOCKED',
         });
       }
 

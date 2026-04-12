@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma, AccountStatus, EnterpriseInvitationStatus } from '@prisma/client';
@@ -56,8 +57,24 @@ function publicAppBaseUrl(): string {
   return String(base).replace(/\/$/, '');
 }
 
+function publicApiRootForServer(): string {
+  const explicit =
+    process.env.PUBLIC_API_ROOT ||
+    process.env.SERVER_PUBLIC_URL ||
+    process.env.API_PUBLIC_URL;
+  if (explicit) {
+    const s = String(explicit).replace(/\/$/, '');
+    return s.endsWith('/api') ? s : `${s}/api`;
+  }
+  return `http://127.0.0.1:${process.env.PORT || '3001'}/api`;
+}
+
 function buildInviteLink(token: string): string {
   return `${publicAppBaseUrl()}/enterprise/activate?token=${encodeURIComponent(token)}`;
+}
+
+function buildEmailOpenPixelUrl(token: string): string {
+  return `${publicApiRootForServer()}/enterprise/activation/track/email-open?token=${encodeURIComponent(token)}`;
 }
 
 function renderPlaceholders(
@@ -109,6 +126,9 @@ function defaultInvitationTemplate(): InvitationTemplateValue {
       <p style="margin:0;color:#6b7280;font-size:12px;">
         Questions? Contact: <a href="mailto:${supportEmail}" style="color:#2563eb;">${supportEmail}</a>
       </p>
+      <p style="margin:0;font-size:0;line-height:0;">
+        <img src="{{emailOpenPixelUrl}}" width="1" height="1" alt="" style="display:block;border:0;outline:none;" />
+      </p>
     </div>
     <p style="text-align:center;color:#9ca3af;font-size:11px;margin:14px 0 0 0;">
       © ${new Date().getFullYear()} ${appName}
@@ -133,13 +153,15 @@ function defaultInvitationTemplate(): InvitationTemplateValue {
 
 @Injectable()
 export class AdminEnterpriseInvitationsService {
+  private readonly logger = new Logger(AdminEnterpriseInvitationsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly authRepo: AuthRepository,
     private readonly authPassword: AuthPasswordService,
     private readonly mail: MailService,
     private readonly settings: SettingsService,
-  ) {}
+  ) { }
 
   private async getTemplate(): Promise<InvitationTemplateValue> {
     const v = await this.settings.getJson<InvitationTemplateValue>(
@@ -245,6 +267,7 @@ export class AdminEnterpriseInvitationsService {
 
     const template = await this.getTemplate();
     const inviteLink = buildInviteLink(token);
+    const emailOpenPixelUrl = buildEmailOpenPixelUrl(token);
     const appName = process.env.APP_NAME || 'HanalaFood';
     const supportEmail = process.env.SMTP_USER || 'support@example.com';
     const params = {
@@ -257,6 +280,7 @@ export class AdminEnterpriseInvitationsService {
       enterprise_name: enterpriseNameDraft || '',
       inviteLink,
       invite_link: inviteLink,
+      emailOpenPixelUrl,
       expiresInDays: String(INVITE_EXPIRES_DAYS),
       supportEmail,
     };
@@ -281,9 +305,9 @@ export class AdminEnterpriseInvitationsService {
     const statusRaw = (params.status || 'all').toLowerCase();
     const status =
       statusRaw === 'pending' ||
-      statusRaw === 'accepted' ||
-      statusRaw === 'expired' ||
-      statusRaw === 'revoked'
+        statusRaw === 'accepted' ||
+        statusRaw === 'expired' ||
+        statusRaw === 'revoked'
         ? statusRaw
         : 'all';
     const q = String(params.search || '').trim();
@@ -315,7 +339,27 @@ export class AdminEnterpriseInvitationsService {
         CreatedAt: true,
       },
     });
-    return { items };
+    const invitationIds = items.map((i) => i.InvitationID);
+    const linkClickIds =
+      invitationIds.length === 0
+        ? new Set<string>()
+        : new Set(
+            (
+              await this.prisma.enterpriseInvitationEngagementEvent.findMany({
+                where: {
+                  InvitationID: { in: invitationIds },
+                  Type: 'LinkClick',
+                },
+                select: { InvitationID: true },
+              })
+            ).map((r) => r.InvitationID),
+          );
+    return {
+      items: items.map((row) => ({
+        ...row,
+        hasActivationLinkClick: linkClickIds.has(row.InvitationID),
+      })),
+    };
   }
 
   async revokeInvitation(invitationId: string) {
@@ -365,13 +409,16 @@ export class AdminEnterpriseInvitationsService {
       data.Status = 'Pending';
     }
 
-    await this.prisma.enterpriseInvitation.update({
-      where: { InvitationID: invitationId },
-      data,
-    });
+    const [, template] = await Promise.all([
+      this.prisma.enterpriseInvitation.update({
+        where: { InvitationID: invitationId },
+        data,
+      }),
+      this.getTemplate(),
+    ]);
 
-    const template = await this.getTemplate();
     const inviteLink = buildInviteLink(token);
+    const emailOpenPixelUrl = buildEmailOpenPixelUrl(token);
     const appName = process.env.APP_NAME || 'HanalaFood';
     const supportEmail = process.env.SMTP_USER || 'support@example.com';
     const draft = row.EnterpriseNameDraft?.trim() || '';
@@ -384,6 +431,7 @@ export class AdminEnterpriseInvitationsService {
       enterprise_name: draft,
       inviteLink,
       invite_link: inviteLink,
+      emailOpenPixelUrl,
       expiresInDays: String(INVITE_EXPIRES_DAYS),
       supportEmail,
     };
@@ -391,15 +439,28 @@ export class AdminEnterpriseInvitationsService {
     const html = renderPlaceholders(template.html, params);
     const text = template.text ? renderPlaceholders(template.text, params) : undefined;
 
-    const sent = await this.mail.sendMail({
-      to: row.Email,
-      subject,
-      html,
-      text,
-    });
-    if (!sent) {
-      throw new BadRequestException('Failed to send invitation email');
-    }
+    // SMTP is slow; respond after DB commit (link is valid). Mail sends in background.
+    void this.mail
+      .sendMail({
+        to: row.Email,
+        subject,
+        html,
+        text,
+      })
+      .then((sent) => {
+        if (!sent) {
+          this.logger.error(
+            `Resend SMTP failed for invitation ${invitationId} (${row.Email})`,
+          );
+        }
+      })
+      .catch((err: unknown) => {
+        this.logger.error(
+          `Resend SMTP error for invitation ${invitationId}`,
+          err instanceof Error ? err.stack : err,
+        );
+      });
+
     return { success: true as const };
   }
 
@@ -430,12 +491,45 @@ export class AdminEnterpriseInvitationsService {
     const base = publicAppBaseUrl();
     const inviteLinkMasked = `${base}/enterprise/activate?token=•••••••••••••••••••••••••••••••••`;
 
+    const engagement = await this.prisma.enterpriseInvitationEngagementEvent.findMany({
+      where: { InvitationID: invitationId },
+      orderBy: { OccurredAt: 'asc' },
+    });
+
+    const emailOpens = engagement.filter((e) => e.Type === 'EmailOpen').length;
+    const linkClicks = engagement.filter((e) => e.Type === 'LinkClick').length;
+
+    const msPerDay = 24 * 60 * 60 * 1000;
+    const daysSinceSent = Math.max(
+      0,
+      Math.floor((Date.now() - row.CreatedAt.getTime()) / msPerDay),
+    );
+
+    const firstEmailOpen = engagement.find((e) => e.Type === 'EmailOpen');
+    const daysFromSentToFirstEmailOpen =
+      firstEmailOpen !== undefined
+        ? Math.max(
+          0,
+          Math.floor(
+            (firstEmailOpen.OccurredAt.getTime() - row.CreatedAt.getTime()) /
+            msPerDay,
+          ),
+        )
+        : null;
+
     const timeline: Array<{ title: string; at: string; by: string }> = [];
     timeline.push({
       title: 'Invitation sent',
       at: row.CreatedAt.toISOString(),
       by: 'Admin',
     });
+    for (const ev of engagement) {
+      timeline.push({
+        title: ev.Type === 'LinkClick' ? 'Link clicked' : 'Email opened',
+        at: ev.OccurredAt.toISOString(),
+        by: 'Recipient',
+      });
+    }
     if (row.Status === 'Accepted' && row.AcceptedAt) {
       timeline.push({
         title: 'Invitation accepted',
@@ -458,10 +552,8 @@ export class AdminEnterpriseInvitationsService {
       });
     }
 
-    const msPerDay = 24 * 60 * 60 * 1000;
-    const daysSinceSent = Math.max(
-      0,
-      Math.floor((Date.now() - row.CreatedAt.getTime()) / msPerDay),
+    timeline.sort(
+      (a, b) => new Date(a.at).getTime() - new Date(b.at).getTime(),
     );
 
     return {
@@ -480,9 +572,10 @@ export class AdminEnterpriseInvitationsService {
       sentByLabel: 'Admin',
       timeline,
       quickStats: {
-        emailOpens: 0,
-        linkClicks: 0,
+        emailOpens,
+        linkClicks,
         daysSinceSent,
+        daysFromSentToFirstEmailOpen,
       },
     };
   }

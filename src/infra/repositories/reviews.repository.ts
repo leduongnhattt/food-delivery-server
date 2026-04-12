@@ -38,8 +38,8 @@ export class ReviewsRepository {
   }
 
   async getEnterpriseIdByAccountId(accountId: string): Promise<string | null> {
-    const e = await this.prisma.enterprise.findUnique({
-      where: { AccountID: accountId },
+    const e = await this.prisma.enterprise.findFirst({
+      where: { AccountID: accountId, DeletedAt: null },
       select: { EnterpriseID: true },
     });
     return e?.EnterpriseID ?? null;
