@@ -99,6 +99,11 @@ enum EnterpriseInvitationStatus {
   Revoked
 }
 
+enum EnterpriseInvitationEngagementType {
+  EmailOpen
+  LinkClick
+}
+
 model EnterpriseInvitation {
   InvitationID String                     @id @default(uuid()) @db.VarChar(36)
   AccountID    String                     @db.VarChar(36)
@@ -112,7 +117,8 @@ model EnterpriseInvitation {
   CreatedAt    DateTime                   @default(now())
   UpdatedAt    DateTime                   @updatedAt
 
-  account Account @relation(fields: [AccountID], references: [AccountID], onDelete: Cascade)
+  account            Account                             @relation(fields: [AccountID], references: [AccountID], onDelete: Cascade)
+  engagementEvents   EnterpriseInvitationEngagementEvent[]
 
   @@index([AccountID])
   @@index([Email])
@@ -120,6 +126,18 @@ model EnterpriseInvitation {
   @@index([ExpiresAt])
   @@index([Status])
   @@map("ENTERPRISE_INVITATION")
+}
+
+model EnterpriseInvitationEngagementEvent {
+  EventID        String                           @id @default(uuid()) @db.VarChar(36)
+  InvitationID   String                           @db.VarChar(36)
+  Type           EnterpriseInvitationEngagementType
+  OccurredAt     DateTime                         @default(now())
+
+  invitation EnterpriseInvitation @relation(fields: [InvitationID], references: [InvitationID], onDelete: Cascade)
+
+  @@index([InvitationID, OccurredAt], map: "EIENG_evt_inv_occ_idx")
+  @@map("ENTERPRISE_INVITATION_ENGAGEMENT_EVENT")
 }
 
 model Enterprise {
