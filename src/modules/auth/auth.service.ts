@@ -117,22 +117,15 @@ export class AuthService {
     if (!customerRole) {
       throw new Error('Customer role not found');
     }
-    const account = await this.authRepo.createAccount({
+    return this.authRepo.createAccountWithCustomerProfile({
       Username: params.username,
       Email: params.email,
       PasswordHash: params.passwordHash,
       RoleID: customerRole.RoleID,
-      Avatar: '',
-      Status: 'Active',
+      fullName: params.username,
+      address: 'Default Address',
+      preferredPaymentMethod: PAYMENT_METHOD.Cash,
     });
-    const customer = await this.authRepo.createCustomer({
-      AccountID: account.AccountID,
-      FullName: params.username,
-      PhoneNumber: '00000000000',
-      Address: 'Default Address',
-      PreferredPaymentMethod: PAYMENT_METHOD.Cash,
-    });
-    return { ...account, customer };
   }
 
   async createCustomer(params: {
