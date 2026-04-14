@@ -6,6 +6,7 @@ import type { CreateCheckoutSessionRequestDto } from '@modules/payments/dto';
 import { PAYMENT_STATUS } from '@common/constants/order-payment-status.constants';
 import { PAYMENT_PROVIDER } from '@common/constants/payment-provider.constants';
 import { PAYMENT_METHOD } from '@common/constants/payment-method.constants';
+import { EtaService } from '@modules/shipping/eta.service';
 
 /**
  * Handles Stripe Checkout API: session creation, line items, commission fee, and voucher coupons.
@@ -16,6 +17,7 @@ export class StripeCheckoutService {
     constructor(
         private readonly prisma: PrismaService,
         private readonly stripeService: StripeService,
+        private readonly etaService: EtaService,
     ) {}
 
     private get stripe(): Stripe {
@@ -120,6 +122,20 @@ export class StripeCheckoutService {
 
             return { order, payment };
         });
+
+        const enterpriseId = cartItems[0]?.menuItem?.restaurantId;
+        if (enterpriseId) {
+          // Best-effort: do not block checkout if ETA provider fails.
+          await this.etaService.computeAndPersistForOrder({
+            orderId: created.order.OrderID,
+            enterpriseId,
+            deliveryInfo: {
+              address: deliveryInfo?.address || '',
+              lat: (deliveryInfo as any)?.lat,
+              lng: (deliveryInfo as any)?.lng,
+            },
+          }).catch(() => undefined);
+        }
 
         const session = await this.stripe.checkout.sessions.create({
             mode: 'payment',

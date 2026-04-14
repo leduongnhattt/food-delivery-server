@@ -18,6 +18,33 @@ import { CurrentAccount } from '@common/decorators';
 export class CustomersController {
   constructor(private readonly customersService: CustomersService) {}
 
+  @Get('me')
+  @UseGuards(JwtAuthGuard)
+  async me(@CurrentAccount() jwt: JwtPayload | null) {
+    if (!jwt?.accountId) {
+      throw new UnauthorizedException();
+    }
+    const customer =
+      await this.customersService.ensureCustomerRowForAccount(jwt.accountId);
+    if (!customer) {
+      return { error: 'Customer not found' };
+    }
+    return {
+      customer: {
+        phone: customer.PhoneNumber ?? null,
+        address: customer.Address ?? null,
+        lat:
+          customer.Latitude != null && Number.isFinite(Number(customer.Latitude))
+            ? Number(customer.Latitude)
+            : null,
+        lng:
+          customer.Longitude != null && Number.isFinite(Number(customer.Longitude))
+            ? Number(customer.Longitude)
+            : null,
+      },
+    };
+  }
+
   @Get('by-account')
   @UseGuards(JwtAuthGuard)
   async getByAccount(
@@ -50,6 +77,8 @@ export class CustomersController {
       fullName?: string;
       phone?: string;
       address?: string;
+      lat?: number;
+      lng?: number;
     },
   ) {
     if (!account) {
@@ -61,6 +90,8 @@ export class CustomersController {
         fullName: body.fullName,
         phone: body.phone,
         address: body.address,
+        lat: body.lat,
+        lng: body.lng,
       },
     );
     if (!updated) {
