@@ -7,6 +7,7 @@ import { ORDER_STATUS, PAYMENT_STATUS } from '@common/constants/order-payment-st
 import { PAYMENT_PROVIDER } from '@common/constants/payment-provider.constants';
 import { PAYMENT_METHOD } from '@common/constants/payment-method.constants';
 import { formatVnpCreateDateCompact, sanitizeVnpOrderDescription } from '@modules/payments/vnpay/utils/vnpay-format.util';
+import { EtaService } from '@modules/shipping/eta.service';
 import {
   loadAccountCurrencyCode,
   loadEnterpriseDisplayNameFromFirstCartItem,
@@ -32,7 +33,8 @@ export class VnPayService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly usdVndExchangeRate: UsdVndExchangeRateService,
-  ) {}
+    private readonly etaService: EtaService,
+  ) { }
 
   async createPaymentUrl(accountId: string, dto: CreateCheckoutSessionRequestDto) {
     const gatewayEnv = this.loadVnpGatewayEnv();
@@ -59,6 +61,19 @@ export class VnPayService {
       fxQuoteHost,
       enterpriseDisplayName,
     });
+
+    const enterpriseId = dto.cartItems?.[0]?.menuItem?.restaurantId;
+    if (enterpriseId) {
+      await this.etaService.computeAndPersistForOrder({
+        orderId,
+        enterpriseId,
+        deliveryInfo: {
+          address: dto.deliveryInfo.address,
+          lat: dto.deliveryInfo.lat,
+          lng: dto.deliveryInfo.lng,
+        },
+      }).catch(() => undefined);
+    }
 
     const paymentRedirectUrl = this.buildSignedVnpPaymentRedirectUrl(gatewayEnv, {
       orderId,

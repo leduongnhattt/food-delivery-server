@@ -5,13 +5,14 @@ import { PaymentsController } from '@modules/payments/payments.controller';
 import { PaymentsService } from '@modules/payments/payments.service';
 import { StripeModule } from '@modules/payments/stripe/stripe.module';
 import { VnPayService } from '@modules/payments/vnpay/vnpay.service';
+import { ShippingModule } from '@modules/shipping/shipping.module';
 
 /**
  * Payments module: facade and HTTP layer only.
  * Payment-method-specific logic lives in submodules (stripe/, future cod/, paypal/).
  */
 @Module({
-    imports: [AuthModule, StripeModule, ExchangeRateModule],
+    imports: [AuthModule, StripeModule, ExchangeRateModule, ShippingModule],
     controllers: [PaymentsController],
     providers: [PaymentsService, VnPayService],
     exports: [VnPayService],

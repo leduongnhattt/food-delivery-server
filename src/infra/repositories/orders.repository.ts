@@ -156,6 +156,15 @@ export class OrdersRepository {
     }
   }
 
+  async findEnterpriseIdByFirstFoodId(foodId: string): Promise<string | null> {
+    if (!foodId?.trim()) return null;
+    const row = await this.prisma.food.findUnique({
+      where: { FoodID: foodId },
+      select: { EnterpriseID: true },
+    });
+    return row?.EnterpriseID ?? null;
+  }
+
   async findValidVoucherId(code: string): Promise<string | null> {
     const voucher = await this.prisma.voucher.findFirst({
       where: {

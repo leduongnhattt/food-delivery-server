@@ -19,6 +19,8 @@ export interface CreateCheckoutSessionRequestDto {
     deliveryInfo: {
         phone: string;
         address: string;
+        lat?: number;
+        lng?: number;
     };
     voucherCode?: string;
     total: number;
@@ -31,7 +33,7 @@ export interface CreateCheckoutSessionRequestDto {
 export interface StoreCartDataRequestDto {
     sessionId: string;
     cartItems: unknown[];
-    deliveryInfo?: { phone?: string; address?: string };
+    deliveryInfo?: { phone?: string; address?: string; lat?: number; lng?: number };
     voucherCode?: string;
     total?: number;
 }

@@ -3,13 +3,14 @@ import { StripeCheckoutService } from '@modules/payments/stripe/stripe-checkout.
 import { CheckoutSuccessService } from '@modules/payments/stripe/checkout-success.service';
 import { CommissionSettlementModule } from '@modules/payments/commission-settlement/commission-settlement.module';
 import { CartModule } from '@modules/cart/cart.module';
+import { ShippingModule } from '@modules/shipping/shipping.module';
 
 /**
  * Stripe payment submodule: checkout session creation and success flow.
  * Add more Stripe-specific pieces (e.g. webhook) here later.
  */
 @Module({
-    imports: [CommissionSettlementModule, CartModule],
+    imports: [CommissionSettlementModule, CartModule, ShippingModule],
     providers: [StripeCheckoutService, CheckoutSuccessService],
     exports: [StripeCheckoutService, CheckoutSuccessService],
 })
