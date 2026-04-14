@@ -375,8 +375,8 @@ export class OrdersService {
           enterpriseId,
           deliveryInfo: {
             address: deliveryInfo.address,
-            lat: (deliveryInfo as any).lat,
-            lng: (deliveryInfo as any).lng,
+            lat: deliveryInfo.lat,
+            lng: deliveryInfo.lng,
           },
         })
         .catch(() => undefined);

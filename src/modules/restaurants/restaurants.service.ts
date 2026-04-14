@@ -490,11 +490,7 @@ export class RestaurantsService {
         ? Math.round(maxMinutesRaw)
         : DEFAULT_MAX_DELIVERY_MINUTES;
 
-    // Sanity check: if distance looks near but duration is huge, treat as invalid.
-    const distanceMeters =
-      typeof (r as any).distanceMeters === 'number' && Number.isFinite((r as any).distanceMeters)
-        ? (r as any).distanceMeters
-        : 0;
+    const distanceMeters = Number.isFinite(r.distanceMeters) ? r.distanceMeters : 0;
     if (distanceMeters > 0 && distanceMeters <= 20_000 && totalMinutes > 180) {
       return null;
     }

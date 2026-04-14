@@ -69,8 +69,8 @@ export class VnPayService {
         enterpriseId,
         deliveryInfo: {
           address: dto.deliveryInfo.address,
-          lat: (dto.deliveryInfo as any).lat,
-          lng: (dto.deliveryInfo as any).lng,
+          lat: dto.deliveryInfo.lat,
+          lng: dto.deliveryInfo.lng,
         },
       }).catch(() => undefined);
     }
