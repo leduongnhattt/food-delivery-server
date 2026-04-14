@@ -4,7 +4,7 @@ import { EnterpriseActivationService } from './enterprise-activation.service';
 
 @Controller('enterprise/activation')
 export class EnterpriseActivationController {
-  constructor(private readonly activation: EnterpriseActivationService) {}
+  constructor(private readonly activation: EnterpriseActivationService) { }
 
   @Get('verify-invite')
   verifyInvite(@Query('token') token: string) {

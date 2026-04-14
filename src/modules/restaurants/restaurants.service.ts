@@ -5,6 +5,9 @@ import {
   RestaurantListCriteria,
   RestaurantsRepositoryLimits,
 } from '@infra/repositories/restaurants.repository';
+import { MapboxClient, type LatLng } from '@infra/mapbox/mapbox.client';
+import { getKeyJson, setKeyJson } from '@infra/redis/redis.service';
+import crypto from 'crypto';
 
 export interface RestaurantListItem {
   id: string;
@@ -79,12 +82,22 @@ export interface RestaurantReviewsResponse {
 
 const DEFAULT_DELIVERY_TIME = '30-45 min';
 const DEFAULT_MINIMUM_ORDER = 0;
+const DELIVERY_TIME_CACHE_TTL_SECONDS = 30 * 60;
+const DEFAULT_BASE_PREP_MINUTES = 20;
+const DEFAULT_MIN_DELIVERY_MINUTES = 10;
+const DEFAULT_MAX_DELIVERY_MINUTES = 240;
 
 @Injectable()
 export class RestaurantsService {
-  constructor(private readonly repo: RestaurantsRepository) {}
+  constructor(
+    private readonly repo: RestaurantsRepository,
+    private readonly mapbox: MapboxClient,
+  ) { }
 
-  async findMany(criteria: RestaurantListCriteria): Promise<RestaurantsListResponse> {
+  async findMany(
+    criteria: RestaurantListCriteria,
+    destination?: { address?: string; lat?: number; lng?: number },
+  ): Promise<RestaurantsListResponse> {
     const where = this.repo.buildWhereFromCriteria(criteria);
     const { page, limit, skip } = this.repo.normalizePagination(
       criteria.page,
@@ -98,8 +111,22 @@ export class RestaurantsService {
       limit,
     );
 
-    const restaurants: RestaurantListItem[] = rows.map((r) =>
-      this.mapRowToListItem(r),
+    const dest = await this.resolveDestination(destination);
+    const etaLabels = dest
+      ? await Promise.all(
+        rows.map(async (r) => {
+          const origin = await this.resolveOriginFromEnterpriseRow(r);
+          if (!origin) return null;
+          return this.computeDeliveryTimeLabel({
+            origin,
+            destination: dest,
+          });
+        }),
+      )
+      : rows.map(() => null);
+
+    const restaurants: RestaurantListItem[] = rows.map((r, idx) =>
+      this.mapRowToListItem(r, etaLabels[idx] ?? null),
     );
 
     return {
@@ -113,7 +140,10 @@ export class RestaurantsService {
     };
   }
 
-  async findById(id: string): Promise<RestaurantDetailDto> {
+  async findById(
+    id: string,
+    destination?: { address?: string; lat?: number; lng?: number },
+  ): Promise<RestaurantDetailDto> {
     const row = await this.repo.findById(id);
     if (!row) {
       throw new NotFoundException('Restaurant not found');
@@ -141,7 +171,14 @@ export class RestaurantsService {
       createdAt: r.CreatedAt,
     }));
 
-    const base = this.mapRowToListItem(row);
+    const dest = await this.resolveDestination(destination);
+    const origin = await this.resolveOriginFromEnterpriseRow(row);
+    const etaLabel =
+      origin && dest
+        ? await this.computeDeliveryTimeLabel({ origin, destination: dest })
+        : null;
+
+    const base = this.mapRowToListItem(row, etaLabel);
     return {
       ...base,
       foods,
@@ -278,6 +315,8 @@ export class RestaurantsService {
     IsActive: boolean;
     CreatedAt: Date;
     UpdatedAt: Date | null;
+    Latitude?: unknown;
+    Longitude?: unknown;
     account: { Avatar: string | null };
     foods: Array<{
       FoodID: string;
@@ -288,7 +327,7 @@ export class RestaurantsService {
     }>;
     reviews: Array<{ Rating: number | null }>;
     _count: { foods: number; reviews: number };
-  }): RestaurantListItem {
+  }, etaLabel: string | null): RestaurantListItem {
     const ratings = row.reviews
       .map((r) => r.Rating)
       .filter((r): r is number => r != null);
@@ -313,7 +352,7 @@ export class RestaurantsService {
       phone: row.PhoneNumber,
       avatarUrl: row.account?.Avatar ?? '',
       rating: Math.round(averageRating * 10) / 10,
-      deliveryTime: DEFAULT_DELIVERY_TIME,
+      deliveryTime: etaLabel ?? DEFAULT_DELIVERY_TIME,
       minimumOrder: DEFAULT_MINIMUM_ORDER,
       isOpen: row.IsActive,
       openHours: row.OpenHours,
@@ -324,5 +363,143 @@ export class RestaurantsService {
       totalFoods: row._count.foods,
       totalReviews: row._count.reviews,
     };
+  }
+
+  private toLatLng(v: { lat?: number; lng?: number }): LatLng | null {
+    if (!Number.isFinite(v.lat) || !Number.isFinite(v.lng)) return null;
+    return { lat: v.lat!, lng: v.lng! };
+  }
+
+  private normalizeAddress(address: string): string {
+    return address.trim().toLowerCase().replace(/\s+/g, ' ');
+  }
+
+  private sha1(s: string): string {
+    return crypto.createHash('sha1').update(s).digest('hex');
+  }
+
+  private async resolveDestination(input?: {
+    address?: string;
+    lat?: number;
+    lng?: number;
+  }): Promise<LatLng | null> {
+    const fromGps = this.toLatLng({ lat: input?.lat, lng: input?.lng });
+    if (fromGps) return fromGps;
+
+    const address = (input?.address ?? '').trim();
+    if (!address) return null;
+
+    const normalized = this.normalizeAddress(address);
+    const key = `geo:fw:vn:${this.sha1(normalized)}`;
+    const cached = await getKeyJson<{ lat: number; lng: number }>(key);
+    if (cached && Number.isFinite(cached.lat) && Number.isFinite(cached.lng)) {
+      return { lat: cached.lat, lng: cached.lng };
+    }
+
+    const r = await this.mapbox.forwardGeocode({ address, country: 'VN', limit: 1 });
+    if (!r) return null;
+    await setKeyJson(key, { lat: r.lat, lng: r.lng }, 30 * 24 * 60 * 60);
+    return { lat: r.lat, lng: r.lng };
+  }
+
+  private async resolveOriginFromEnterpriseRow(row: {
+    Latitude?: unknown;
+    Longitude?: unknown;
+    Address: string;
+  }): Promise<LatLng | null> {
+    const lat =
+      row.Latitude != null && Number.isFinite(Number(row.Latitude))
+        ? Number(row.Latitude)
+        : undefined;
+    const lng =
+      row.Longitude != null && Number.isFinite(Number(row.Longitude))
+        ? Number(row.Longitude)
+        : undefined;
+
+    const fromDb = this.toLatLng({ lat, lng });
+    if (fromDb) return fromDb;
+
+    // Fallback: geocode enterprise address once (cached) so restaurant list can still compute delivery time.
+    const address = (row.Address ?? '').trim();
+    if (!address) return null;
+
+    const normalized = this.normalizeAddress(address);
+    const key = `geo:fw:vn:${this.sha1(normalized)}`;
+    const cached = await getKeyJson<{ lat: number; lng: number }>(key);
+    if (cached && Number.isFinite(cached.lat) && Number.isFinite(cached.lng)) {
+      return { lat: cached.lat, lng: cached.lng };
+    }
+
+    const r = await this.mapbox.forwardGeocode({ address, country: 'VN', limit: 1 });
+    if (!r) return null;
+    await setKeyJson(key, { lat: r.lat, lng: r.lng }, 30 * 24 * 60 * 60);
+    return { lat: r.lat, lng: r.lng };
+  }
+
+  private roundCoord(n: number): number {
+    return Math.round(n * 100000) / 100000;
+  }
+
+  private async computeDeliveryTimeLabel(params: {
+    origin: LatLng;
+    destination: LatLng;
+  }): Promise<string | null> {
+    const origin = this.toLatLng(params.origin);
+    const destination = this.toLatLng(params.destination);
+    if (!origin || !destination) return null;
+
+    const o = { lat: this.roundCoord(origin.lat), lng: this.roundCoord(origin.lng) };
+    const d = { lat: this.roundCoord(destination.lat), lng: this.roundCoord(destination.lng) };
+    const cacheKey = `geo:mx:driving:${o.lng},${o.lat}:${d.lng},${d.lat}`;
+
+    const cached = await getKeyJson<{ durationSeconds: number; distanceMeters?: number }>(cacheKey);
+    const durationSeconds =
+      cached && typeof cached.durationSeconds === 'number' && Number.isFinite(cached.durationSeconds)
+        ? cached.durationSeconds
+        : null;
+    const cachedDistanceMeters =
+      cached && typeof cached.distanceMeters === 'number' && Number.isFinite(cached.distanceMeters)
+        ? cached.distanceMeters
+        : null;
+
+    const r =
+      durationSeconds != null
+        ? { durationSeconds, distanceMeters: cachedDistanceMeters ?? 0 }
+        : await this.mapbox.matrixDuration({ origin, destination, profile: 'driving' });
+
+    if (!r) return null;
+    await setKeyJson(cacheKey, r, DELIVERY_TIME_CACHE_TTL_SECONDS);
+
+    const basePrepMinutesRaw = Number(process.env.ETA_BASE_PREP_MINUTES);
+    const basePrepMinutes =
+      Number.isFinite(basePrepMinutesRaw) && basePrepMinutesRaw >= 0
+        ? Math.round(basePrepMinutesRaw)
+        : DEFAULT_BASE_PREP_MINUTES;
+
+    const travelMinutes = Math.max(1, Math.ceil(r.durationSeconds / 60));
+    const totalMinutes = basePrepMinutes + travelMinutes;
+
+    const minMinutesRaw = Number(process.env.ETA_MIN_MINUTES);
+    const maxMinutesRaw = Number(process.env.ETA_MAX_MINUTES);
+    const minMinutes =
+      Number.isFinite(minMinutesRaw) && minMinutesRaw > 0
+        ? Math.round(minMinutesRaw)
+        : DEFAULT_MIN_DELIVERY_MINUTES;
+    const maxMinutes =
+      Number.isFinite(maxMinutesRaw) && maxMinutesRaw > 0
+        ? Math.round(maxMinutesRaw)
+        : DEFAULT_MAX_DELIVERY_MINUTES;
+
+    const distanceMeters = Number.isFinite(r.distanceMeters) ? r.distanceMeters : 0;
+    if (distanceMeters > 0 && distanceMeters <= 20_000 && totalMinutes > 180) {
+      return null;
+    }
+
+    const clamped = Math.max(minMinutes, Math.min(maxMinutes, totalMinutes));
+    // UI expects a range string like '30-45 min'. Keep a simple +-5min window.
+    const lo = Math.max(5, clamped - 5);
+    const hi = clamped + 5;
+    const label = `${lo}-${hi} min`;
+    return label;
   }
 }

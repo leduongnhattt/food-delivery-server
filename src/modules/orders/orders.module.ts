@@ -5,9 +5,10 @@ import { OrdersService } from '@modules/orders/orders.service';
 import { OrdersRepository } from '@infra/repositories/orders.repository';
 import { CustomersModule } from '@modules/customers/customers.module';
 import { AuthModule } from '@modules/auth/auth.module';
+import { ShippingModule } from '@modules/shipping/shipping.module';
 
 @Module({
-  imports: [PrismaModule, CustomersModule, AuthModule],
+  imports: [PrismaModule, CustomersModule, AuthModule, ShippingModule],
   providers: [OrdersService, OrdersRepository],
   controllers: [OrdersController],
 })

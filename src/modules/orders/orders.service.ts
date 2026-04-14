@@ -9,6 +9,7 @@ import {
 } from '@infra/repositories/orders.repository';
 import { CustomersService } from '@modules/customers/customers.service';
 import { PAYMENT_METHOD } from '@common/constants/payment-method.constants';
+import { EtaService } from '@modules/shipping/eta.service';
 
 type FoodWithImageURL = {
   ImageURL?: string | null;
@@ -70,6 +71,8 @@ export interface OrderCartItemDto {
 
 export interface DeliveryInfoDto {
   address: string;
+  lat?: number;
+  lng?: number;
 }
 
 export interface CreateOrderRequestDto {
@@ -84,6 +87,7 @@ export class OrdersService {
   constructor(
     private readonly repo: OrdersRepository,
     private readonly customersService: CustomersService,
+    private readonly etaService: EtaService,
   ) {}
 
   async listForCustomer(
@@ -256,6 +260,10 @@ export class OrdersService {
     let estimatedDeliveryTime: Date | null = null;
     const status = String(order.Status);
 
+    // Prefer persisted ETA (computed at order creation) regardless of status.
+    if (order.EstimatedDeliveryTime) {
+      estimatedDeliveryTime = order.EstimatedDeliveryTime;
+    } else
     if (status === 'Pending') {
       estimatedDeliveryTime = new Date(orderTime.getTime() + 45 * 60000);
     } else if (status === 'Completed') {
@@ -355,6 +363,24 @@ export class OrdersService {
       totalAmount: total,
       paymentIntentId,
     });
+
+    const firstFoodId = cartItems[0]?.menuItem?.id;
+    const enterpriseId = firstFoodId
+      ? await this.repo.findEnterpriseIdByFirstFoodId(firstFoodId)
+      : null;
+    if (enterpriseId) {
+      await this.etaService
+        .computeAndPersistForOrder({
+          orderId: order.OrderID,
+          enterpriseId,
+          deliveryInfo: {
+            address: deliveryInfo.address,
+            lat: deliveryInfo.lat,
+            lng: deliveryInfo.lng,
+          },
+        })
+        .catch(() => undefined);
+    }
 
     // TODO: clear cart after order creation if needed
 
