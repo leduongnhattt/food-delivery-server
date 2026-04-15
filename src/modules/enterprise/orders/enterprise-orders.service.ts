@@ -161,10 +161,12 @@ export class EnterpriseOrdersService {
     });
   }
 
-  async list(accountId: string) {
+  async list(accountId: string, opts?: { force?: boolean }) {
     const enterpriseId = await this.getEnterpriseIdByAccountId(accountId);
 
-    const cached = await getKeyJson<OrdersCachePayload>(CACHE_KEYS.orders(enterpriseId));
+    const cached = opts?.force
+      ? null
+      : await getKeyJson<OrdersCachePayload>(CACHE_KEYS.orders(enterpriseId));
     if (cached) {
       return {
         success: true,

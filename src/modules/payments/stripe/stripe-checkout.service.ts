@@ -7,6 +7,9 @@ import { PAYMENT_STATUS } from '@common/constants/order-payment-status.constants
 import { PAYMENT_PROVIDER } from '@common/constants/payment-provider.constants';
 import { PAYMENT_METHOD } from '@common/constants/payment-method.constants';
 import { EtaService } from '@modules/shipping/eta.service';
+import { invalidateEnterpriseOrderCaches } from '@modules/enterprise/orders/enterprise-order-cache.util';
+import crypto from 'crypto';
+import { setKeyJson } from '@infra/redis/redis.service';
 
 /**
  * Handles Stripe Checkout API: session creation, line items, commission fee, and voucher coupons.
@@ -18,10 +21,40 @@ export class StripeCheckoutService {
         private readonly prisma: PrismaService,
         private readonly stripeService: StripeService,
         private readonly etaService: EtaService,
-    ) {}
+    ) { }
 
     private get stripe(): Stripe {
         return this.stripeService.getClient();
+    }
+
+    private stripeAttemptKey(attemptId: string) {
+        return `stripe:attempt:${attemptId}`;
+    }
+
+    private stripeAttemptTtlSeconds(): number {
+        const raw = process.env.STRIPE_ATTEMPT_TTL_SECONDS;
+        const n = raw ? Number(raw) : 60 * 60; // 1 hour
+        if (!Number.isFinite(n) || n <= 0) return 60 * 60;
+        return Math.floor(n);
+    }
+
+    private isAbsoluteHttpUrl(input: unknown): boolean {
+        const v = String(input ?? '').trim();
+        return /^https?:\/\/.+/i.test(v);
+    }
+
+    private getDefaultProductImageUrl(): string {
+        const fromEnv = process.env.APP_DEFAULT_PRODUCT_IMAGE_URL?.trim();
+        if (this.isAbsoluteHttpUrl(fromEnv)) return String(fromEnv).trim();
+        // Requested default image for products without a real image.
+        return 'https://adstandards.com.au/issues/food-beverage-advertising/';
+    }
+
+    private pickStripeProductImages(input: unknown): string[] {
+        const candidate = String(input ?? '').trim();
+        // Stripe requires absolute http(s) URLs. Treat relative placeholders as "no image".
+        if (this.isAbsoluteHttpUrl(candidate)) return [candidate];
+        return [this.getDefaultProductImageUrl()];
     }
 
     private getDefaultSuccessUrl(): string {
@@ -89,53 +122,21 @@ export class StripeCheckoutService {
             currency,
         );
 
-        // Create Order + Payment(Pending) BEFORE redirecting to Stripe.
-        // This prevents "missed payment" when the user never returns from Stripe.
-        const created = await this.prisma.$transaction(async (tx) => {
-            const order = await tx.order.create({
-                data: {
-                    CustomerID: customer.CustomerID,
-                    TotalAmount: 0, // finalized from Stripe amount_total after payment
-                    DeliveryAddress: deliveryInfo?.address || '',
-                    DeliveryNote: '',
-                    Status: 'Pending',
-                    orderDetails: {
-                        create: cartItems.map((item) => ({
-                            FoodID: item.menuItem.id,
-                            Quantity: item.quantity,
-                            SubTotal: item.menuItem.price * item.quantity,
-                        })),
-                    },
-                },
-            });
-
-            const payment = await tx.payment.create({
-                data: {
-                    OrderID: order.OrderID,
-                    PaymentMethod: PAYMENT_METHOD.CreditCard,
-                    PaymentStatus: PAYMENT_STATUS.Pending,
-                    TransactionData: {
-                        provider: PAYMENT_PROVIDER.Stripe,
-                    },
-                },
-            });
-
-            return { order, payment };
-        });
-
-        const enterpriseId = cartItems[0]?.menuItem?.restaurantId;
-        if (enterpriseId) {
-          // Best-effort: do not block checkout if ETA provider fails.
-          await this.etaService.computeAndPersistForOrder({
-            orderId: created.order.OrderID,
-            enterpriseId,
-            deliveryInfo: {
-              address: deliveryInfo?.address || '',
-              lat: deliveryInfo?.lat,
-              lng: deliveryInfo?.lng,
+        // Store attempt only; create Order/Payment only after Stripe confirms payment (paid).
+        const attemptId = crypto.randomUUID();
+        const enterpriseId = cartItems[0]?.menuItem?.restaurantId || null;
+        await setKeyJson(
+            this.stripeAttemptKey(attemptId),
+            {
+                attemptId,
+                accountId,
+                customerId: customer.CustomerID,
+                dto,
+                enterpriseId,
+                createdAtIso: new Date().toISOString(),
             },
-          }).catch(() => undefined);
-        }
+            this.stripeAttemptTtlSeconds(),
+        );
 
         const session = await this.stripe.checkout.sessions.create({
             mode: 'payment',
@@ -146,15 +147,13 @@ export class StripeCheckoutService {
             discounts,
             payment_intent_data: {
                 metadata: {
-                    orderId: created.order.OrderID,
-                    paymentId: created.payment.PaymentID,
                     accountId,
+                    attemptId,
                 },
             },
             metadata: {
                 accountId,
-                orderId: created.order.OrderID,
-                paymentId: created.payment.PaymentID,
+                attemptId,
                 itemCount: cartItems.length.toString(),
                 total: total.toString(),
                 phone: deliveryInfo?.phone || '',
@@ -168,16 +167,6 @@ export class StripeCheckoutService {
         if (!session.url || !session.id) {
             throw new BadRequestException('Failed to create checkout session');
         }
-
-        await this.prisma.payment.update({
-            where: { PaymentID: created.payment.PaymentID },
-            data: {
-                TransactionData: {
-                    ...(created.payment.TransactionData as object),
-                    session_id: session.id,
-                },
-            },
-        });
 
         return { url: session.url, sessionId: session.id };
     }
@@ -202,7 +191,7 @@ export class StripeCheckoutService {
                     description: item.menuItem.restaurantName
                         ? `Restaurant: ${item.menuItem.restaurantName}`
                         : undefined,
-                    images: item.menuItem.image ? [item.menuItem.image] : undefined,
+                    images: this.pickStripeProductImages(item.menuItem.image),
                 },
                 unit_amount: Math.round(item.menuItem.price * 100),
             },

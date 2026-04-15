@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { OrderStatus, Prisma } from '@prisma/client';
+import { OrderStatus, PaymentMethod, PaymentStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '@infra/prisma/prisma.service';
 import type { OrderCartItemDto } from '@modules/orders/orders.service';
 import { ORDER_STATUS, PAYMENT_STATUS } from '@common/constants/order-payment-status.constants';
@@ -96,6 +96,7 @@ export class OrdersRepository {
               FullName: true,
             },
           },
+          payments: { orderBy: { PaymentDate: 'desc' }, take: 1 },
         },
         orderBy: { OrderDate: 'desc' },
         skip,
@@ -130,6 +131,80 @@ export class OrdersRepository {
       where: { OrderID: orderId },
       select: { CustomerID: true, Status: true },
     });
+  }
+
+  async findCancelContextForCustomer(orderId: string) {
+    return this.prisma.order.findUnique({
+      where: { OrderID: orderId },
+      select: {
+        OrderID: true,
+        CustomerID: true,
+        Status: true,
+        Metadata: true,
+        OrderDate: true,
+        payments: {
+          orderBy: { PaymentDate: 'desc' },
+          take: 1,
+          select: { PaymentMethod: true, PaymentStatus: true },
+        },
+        orderDetails: {
+          select: { food: { select: { EnterpriseID: true } } },
+        },
+      },
+    });
+  }
+
+  async cancelPendingOrder(params: {
+    orderId: string;
+    cutoff?: Date;
+    cancelReason: string;
+    refundPending?: boolean;
+  }): Promise<{ updated: boolean; enterpriseIds: string[] }> {
+    const ctx = await this.findCancelContextForCustomer(params.orderId);
+    if (!ctx) return { updated: false, enterpriseIds: [] };
+
+    const enterpriseIds = Array.from(
+      new Set(
+        ctx.orderDetails
+          .map((d) => d.food?.EnterpriseID)
+          .filter((v): v is string => typeof v === 'string' && v.length > 0),
+      ),
+    );
+
+    const base =
+      ctx.Metadata && typeof ctx.Metadata === 'object' && !Array.isArray(ctx.Metadata)
+        ? (ctx.Metadata as Record<string, unknown>)
+        : {};
+
+    const nextMeta = {
+      ...base,
+      cancelReason: params.cancelReason,
+      cancelledAt: new Date().toISOString(),
+      ...(params.refundPending ? { refundPending: true, refundReason: params.cancelReason } : {}),
+    };
+
+    // Atomic soft-cancel: only cancel if still Pending (and optional cutoff condition holds).
+    const res = await this.prisma.order.updateMany({
+      where: {
+        OrderID: params.orderId,
+        Status: OrderStatus.Pending,
+        ...(params.cutoff ? { OrderDate: { lte: params.cutoff } } : {}),
+      },
+      data: { Status: OrderStatus.Cancelled, Metadata: nextMeta },
+    });
+
+    // If we cancelled a COD order where payment is still Pending, mark that payment Failed.
+    if (res.count > 0) {
+      const latest = ctx.payments[0];
+      if (latest?.PaymentMethod === PaymentMethod.Cash) {
+        await this.prisma.payment.updateMany({
+          where: { OrderID: params.orderId, PaymentStatus: PaymentStatus.Pending },
+          data: { PaymentStatus: PaymentStatus.Failed },
+        });
+      }
+    }
+
+    return { updated: res.count > 0, enterpriseIds };
   }
 
   async deleteOrderCascade(orderId: string) {
