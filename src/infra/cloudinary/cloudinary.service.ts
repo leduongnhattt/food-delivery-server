@@ -6,6 +6,7 @@ const MAX_BYTES = 5 * 1024 * 1024; // 5MB
 export interface CloudinaryUploadOptions {
   folder?: string;
   maxBytes?: number;
+  allowedMime?: string[];
 }
 
 /**
@@ -24,7 +25,8 @@ export async function uploadBufferToCloudinary(
     throw new Error('Cloudinary is not configured');
   }
 
-  if (!ALLOWED_MIME.includes(mimeType)) {
+  const allowedMime = options.allowedMime ?? ALLOWED_MIME;
+  if (!allowedMime.includes(mimeType)) {
     throw new Error('Unsupported file type');
   }
 

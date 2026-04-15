@@ -1,7 +1,35 @@
 import { Injectable } from '@nestjs/common';
-import { OrderStatus, Prisma } from '@prisma/client';
+import { OrderStatus, PaymentMethod, PaymentStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '@infra/prisma/prisma.service';
 import type { OrderCartItemDto } from '@modules/orders/orders.service';
+import { ORDER_STATUS, PAYMENT_STATUS } from '@common/constants/order-payment-status.constants';
+import { PAYMENT_METHOD } from '@common/constants/payment-method.constants';
+
+export type OrderForCustomerList = Prisma.OrderGetPayload<{
+  include: {
+    orderDetails: {
+      include: {
+        food: {
+          select: {
+            FoodID: true;
+            DishName: true;
+            Price: true;
+            ImageURL: true;
+            EnterpriseID: true;
+            enterprise: {
+              select: {
+                EnterpriseName: true;
+                account: { select: { Avatar: true } };
+              };
+            };
+          };
+        };
+      };
+    };
+    customer: { select: { FullName: true } };
+    payments: true;
+  };
+}>;
 
 export interface OrderListCriteria {
   customerId: string;
@@ -42,7 +70,9 @@ export class OrdersRepository {
     });
   }
 
-  async findManyForCustomer(criteria: OrderListCriteria) {
+  async findManyForCustomer(
+    criteria: OrderListCriteria,
+  ): Promise<{ rows: OrderForCustomerList[]; total: number; page: number; limit: number }> {
     const { page, limit, skip } = this.normalizePagination(
       criteria.page,
       criteria.limit,
@@ -77,10 +107,12 @@ export class OrdersRepository {
                   FoodID: true,
                   DishName: true,
                   Price: true,
+                  ImageURL: true,
                   EnterpriseID: true,
                   enterprise: {
                     select: {
                       EnterpriseName: true,
+                      account: { select: { Avatar: true } },
                     },
                   },
                 },
@@ -92,6 +124,7 @@ export class OrdersRepository {
               FullName: true,
             },
           },
+          payments: { orderBy: { PaymentDate: 'desc' }, take: 1 },
         },
         orderBy: { OrderDate: 'desc' },
         skip,
@@ -111,7 +144,7 @@ export class OrdersRepository {
           include: {
             food: {
               include: {
-                enterprise: { select: { EnterpriseID: true, EnterpriseName: true } },
+                enterprise: { select: { EnterpriseID: true, EnterpriseName: true, account: { select: { Avatar: true } } } },
               },
             },
           },
@@ -126,6 +159,80 @@ export class OrdersRepository {
       where: { OrderID: orderId },
       select: { CustomerID: true, Status: true },
     });
+  }
+
+  async findCancelContextForCustomer(orderId: string) {
+    return this.prisma.order.findUnique({
+      where: { OrderID: orderId },
+      select: {
+        OrderID: true,
+        CustomerID: true,
+        Status: true,
+        Metadata: true,
+        OrderDate: true,
+        payments: {
+          orderBy: { PaymentDate: 'desc' },
+          take: 1,
+          select: { PaymentMethod: true, PaymentStatus: true },
+        },
+        orderDetails: {
+          select: { food: { select: { EnterpriseID: true } } },
+        },
+      },
+    });
+  }
+
+  async cancelPendingOrder(params: {
+    orderId: string;
+    cutoff?: Date;
+    cancelReason: string;
+    refundPending?: boolean;
+  }): Promise<{ updated: boolean; enterpriseIds: string[] }> {
+    const ctx = await this.findCancelContextForCustomer(params.orderId);
+    if (!ctx) return { updated: false, enterpriseIds: [] };
+
+    const enterpriseIds = Array.from(
+      new Set(
+        ctx.orderDetails
+          .map((d) => d.food?.EnterpriseID)
+          .filter((v): v is string => typeof v === 'string' && v.length > 0),
+      ),
+    );
+
+    const base =
+      ctx.Metadata && typeof ctx.Metadata === 'object' && !Array.isArray(ctx.Metadata)
+        ? (ctx.Metadata as Record<string, unknown>)
+        : {};
+
+    const nextMeta = {
+      ...base,
+      cancelReason: params.cancelReason,
+      cancelledAt: new Date().toISOString(),
+      ...(params.refundPending ? { refundPending: true, refundReason: params.cancelReason } : {}),
+    };
+
+    // Atomic soft-cancel: only cancel if still Pending (and optional cutoff condition holds).
+    const res = await this.prisma.order.updateMany({
+      where: {
+        OrderID: params.orderId,
+        Status: OrderStatus.Pending,
+        ...(params.cutoff ? { OrderDate: { lte: params.cutoff } } : {}),
+      },
+      data: { Status: OrderStatus.Cancelled, Metadata: nextMeta },
+    });
+
+    // If we cancelled a COD order where payment is still Pending, mark that payment Failed.
+    if (res.count > 0) {
+      const latest = ctx.payments[0];
+      if (latest?.PaymentMethod === PaymentMethod.Cash) {
+        await this.prisma.payment.updateMany({
+          where: { OrderID: params.orderId, PaymentStatus: PaymentStatus.Pending },
+          data: { PaymentStatus: PaymentStatus.Failed },
+        });
+      }
+    }
+
+    return { updated: res.count > 0, enterpriseIds };
   }
 
   async deleteOrderCascade(orderId: string) {
@@ -150,6 +257,15 @@ export class OrdersRepository {
         throw new Error(`Item ${food.DishName} is currently unavailable`);
       }
     }
+  }
+
+  async findEnterpriseIdByFirstFoodId(foodId: string): Promise<string | null> {
+    if (!foodId?.trim()) return null;
+    const row = await this.prisma.food.findUnique({
+      where: { FoodID: foodId },
+      select: { EnterpriseID: true },
+    });
+    return row?.EnterpriseID ?? null;
   }
 
   async findValidVoucherId(code: string): Promise<string | null> {
@@ -179,7 +295,7 @@ export class OrdersRepository {
         TotalAmount: params.totalAmount,
         DeliveryAddress: params.deliveryAddress,
         DeliveryNote: '',
-        Status: 'Pending',
+        Status: ORDER_STATUS.Pending,
       },
     });
 
@@ -202,9 +318,9 @@ export class OrdersRepository {
         data: {
           PaymentID: params.paymentIntentId,
           OrderID: order.OrderID,
-          PaymentMethod: 'CreditCard',
+          PaymentMethod: PAYMENT_METHOD.CreditCard,
           TransactionID: params.paymentIntentId,
-          PaymentStatus: 'Completed',
+          PaymentStatus: PAYMENT_STATUS.Completed,
           TransactionData: {
             payment_intent_id: params.paymentIntentId,
             status: 'succeeded',
@@ -240,7 +356,7 @@ export class OrdersRepository {
         TotalAmount: order.TotalAmount,
         DeliveryAddress: order.DeliveryAddress,
         DeliveryNote: order.DeliveryNote,
-        Status: 'Pending',
+        Status: ORDER_STATUS.Pending,
       },
     });
 

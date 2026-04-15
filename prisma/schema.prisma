@@ -46,6 +46,7 @@ model Account {
   authTokens  AuthToken[]
   driver      DeliveryDriver?
   passwordResetTokens PasswordResetToken[]
+  enterpriseInvitations EnterpriseInvitation[]
   auditLogs   AuditLog[]
 
   @@index([RoleID])
@@ -59,11 +60,26 @@ model Account {
   @@map("ACCOUNT")
 }
 
+model AppSetting {
+  SettingID String   @id @default(uuid()) @db.VarChar(36)
+  Key       String   @unique @db.VarChar(120)
+  Value     Json
+  UpdatedAt DateTime @updatedAt
+  CreatedAt DateTime @default(now())
+
+  @@index([Key])
+  @@index([UpdatedAt])
+  @@map("APP_SETTING")
+}
+
 model Customer {
   CustomerID              String        @id @default(uuid()) @db.VarChar(36)
   FullName                String        @db.VarChar(100)
   PhoneNumber             String        @unique @db.VarChar(15)
   Address                 String        @db.VarChar(255)
+  Latitude                Decimal?      @db.Decimal(10, 7)
+  Longitude               Decimal?      @db.Decimal(10, 7)
+  LocationUpdatedAt       DateTime?
   DateOfBirth             DateTime?
   Gender                  Gender?
   PreferredPaymentMethod  PaymentMethod
@@ -76,7 +92,56 @@ model Customer {
   orders  Order[]
 
   @@index([PreferredPaymentMethod])
+  @@index([Latitude, Longitude])
   @@map("CUSTOMER")
+}
+
+enum EnterpriseInvitationStatus {
+  Pending
+  Accepted
+  Expired
+  Revoked
+}
+
+enum EnterpriseInvitationEngagementType {
+  EmailOpen
+  LinkClick
+}
+
+model EnterpriseInvitation {
+  InvitationID String                     @id @default(uuid()) @db.VarChar(36)
+  AccountID    String                     @db.VarChar(36)
+  Email        String                     @db.VarChar(100)
+  PhoneNumber  String                     @db.VarChar(15)
+  EnterpriseNameDraft String?             @db.VarChar(100)
+  TokenHash    String                     @db.VarChar(255)
+  ExpiresAt    DateTime
+  Status       EnterpriseInvitationStatus @default(Pending)
+  AcceptedAt   DateTime?
+  CreatedAt    DateTime                   @default(now())
+  UpdatedAt    DateTime                   @updatedAt
+
+  account            Account                             @relation(fields: [AccountID], references: [AccountID], onDelete: Cascade)
+  engagementEvents   EnterpriseInvitationEngagementEvent[]
+
+  @@index([AccountID])
+  @@index([Email])
+  @@index([PhoneNumber])
+  @@index([ExpiresAt])
+  @@index([Status])
+  @@map("ENTERPRISE_INVITATION")
+}
+
+model EnterpriseInvitationEngagementEvent {
+  EventID        String                           @id @default(uuid()) @db.VarChar(36)
+  InvitationID   String                           @db.VarChar(36)
+  Type           EnterpriseInvitationEngagementType
+  OccurredAt     DateTime                         @default(now())
+
+  invitation EnterpriseInvitation @relation(fields: [InvitationID], references: [InvitationID], onDelete: Cascade)
+
+  @@index([InvitationID, OccurredAt], map: "EIENG_evt_inv_occ_idx")
+  @@map("ENTERPRISE_INVITATION_ENGAGEMENT_EVENT")
 }
 
 model Enterprise {
@@ -104,7 +169,6 @@ model Enterprise {
   carts     Cart[]
   foods     Food[]
   settlements                  Settlement[]
-  enterpriseCategoryCommissions EnterpriseCategoryCommission[]
   deductionRules               DeductionRule[]
   payoutDestinations           EnterprisePayoutDestination[]
   payoutSettings               EnterprisePayoutSettings?
@@ -127,9 +191,9 @@ model Admin {
   account  Account   @relation(fields: [AccountID], references: [AccountID], onDelete: Cascade)
   vouchers Voucher[]
   foodCategories FoodCategory[]
+  assignedSupportTickets Support[] @relation("SupportAssignedAdmin")
   platformCommissionDefaultsUpdated     PlatformCommissionDefault[]     @relation("PlatformCommissionDefaultUpdatedBy")
   categoryCommissionDefaultsUpdated     CategoryCommissionDefault[]     @relation("CategoryCommissionDefaultUpdatedBy")
-  enterpriseCategoryCommissionsUpdated  EnterpriseCategoryCommission[]  @relation("EnterpriseCategoryCommissionUpdatedBy")
   deductionRulesCreated               DeductionRule[]                  @relation("DeductionRuleCreatedBy")
   settlementDeductionsCreated          SettlementDeduction[]            @relation("SettlementDeductionCreatedBy")
 
@@ -147,8 +211,7 @@ model FoodCategory {
 
   foods                         Food[]
   admin                         Admin                         @relation(fields: [AdminID], references: [AdminID], onDelete: Restrict)
-  commissionDefault             CategoryCommissionDefault?
-  enterpriseCategoryCommissions EnterpriseCategoryCommission[]
+  commissionDefaults            CategoryCommissionDefault[]
 
   @@index([AdminID])
   @@map("FOOD_CATEGORY")
@@ -419,7 +482,8 @@ model PlatformCommissionDefault {
 }
 
 model CategoryCommissionDefault {
-  FoodCategoryID      String    @id @db.VarChar(36)
+  CommissionDefaultID String    @id @default(uuid()) @db.VarChar(36)
+  FoodCategoryID      String    @db.VarChar(36)
   CommissionPercent   Decimal   @db.Decimal(5, 2)
   IsActive            Boolean   @default(true)
   EffectiveFrom       DateTime  @default(now())
@@ -430,31 +494,12 @@ model CategoryCommissionDefault {
   foodCategory FoodCategory @relation(fields: [FoodCategoryID], references: [CategoryID], onDelete: Cascade)
   updatedBy    Admin?       @relation("CategoryCommissionDefaultUpdatedBy", fields: [UpdatedByAdminID], references: [AdminID], onDelete: SetNull)
 
+  @@unique([FoodCategoryID, EffectiveFrom])
+  @@index([FoodCategoryID])
   @@index([IsActive])
+  @@index([EffectiveFrom, EffectiveTo])
   @@index([UpdatedByAdminID])
   @@map("CATEGORY_COMMISSION_DEFAULT")
-}
-
-model EnterpriseCategoryCommission {
-  EnterpriseCategoryCommissionID String    @id @default(uuid()) @db.VarChar(36)
-  EnterpriseID                   String    @db.VarChar(36)
-  FoodCategoryID                 String    @db.VarChar(36)
-  CommissionPercent              Decimal   @db.Decimal(5, 2)
-  IsActive                       Boolean   @default(true)
-  EffectiveFrom                  DateTime  @default(now())
-  EffectiveTo                    DateTime?
-  UpdatedAt                      DateTime? @updatedAt
-  UpdatedByAdminID               String?   @db.VarChar(36)
-
-  enterprise   Enterprise   @relation(fields: [EnterpriseID], references: [EnterpriseID], onDelete: Cascade)
-  foodCategory FoodCategory @relation(fields: [FoodCategoryID], references: [CategoryID], onDelete: Restrict)
-  updatedBy    Admin?       @relation("EnterpriseCategoryCommissionUpdatedBy", fields: [UpdatedByAdminID], references: [AdminID], onDelete: SetNull)
-
-  @@unique([EnterpriseID, FoodCategoryID])
-  @@index([EnterpriseID])
-  @@index([FoodCategoryID])
-  @@index([UpdatedByAdminID])
-  @@map("ENTERPRISE_CATEGORY_COMMISSION")
 }
 
 model DeductionRule {
@@ -526,20 +571,43 @@ model AuditLog {
 }
 
 model Support {
-  MessageID    String        @id @default(uuid()) @db.VarChar(36)
-  AccountID    String        @db.VarChar(36)
-  Subject      String        @db.VarChar(255)
-  Description  String?       @db.Text
-  SentAt       DateTime      @default(now())
-  Status       SupportStatus @default(Pending)
-  ReplyMessage String?       @db.Text
+  MessageID         String           @id @default(uuid()) @db.VarChar(36)
+  AccountID         String           @db.VarChar(36)
+  Subject           String           @db.VarChar(255)
+  Description       String?          @db.Text
+  SentAt            DateTime         @default(now())
+  Status            SupportStatus    @default(Pending)
+  ReplyMessage      String?          @db.Text
+  Category          SupportCategory  @default(General)
+  AssignedAdminID   String?          @db.VarChar(36)
+  AssignedAt        DateTime?
+  UpdatedAt         DateTime?        @updatedAt
+  LastActivityAt    DateTime?
 
-  account Account @relation(fields: [AccountID], references: [AccountID], onDelete: Cascade)
+  account       Account @relation(fields: [AccountID], references: [AccountID], onDelete: Cascade)
+  assignedAdmin Admin?  @relation("SupportAssignedAdmin", fields: [AssignedAdminID], references: [AdminID], onDelete: SetNull)
+  messages     SupportMessage[]
 
   @@index([AccountID])
   @@index([Status])
   @@index([SentAt])
+  @@index([Category])
+  @@index([AssignedAdminID])
   @@map("SUPPORT")
+}
+
+model SupportMessage {
+  SupportMessageID String   @id @default(uuid()) @db.VarChar(36)
+  SupportID        String   @db.VarChar(36)
+  Sender           String   @db.VarChar(20) // 'User' | 'Admin'
+  Body             String   @db.Text
+  CreatedAt        DateTime @default(now())
+
+  support Support @relation(fields: [SupportID], references: [MessageID], onDelete: Cascade)
+
+  @@index([SupportID])
+  @@index([CreatedAt])
+  @@map("SUPPORT_MESSAGE")
 }
 
 model Review {
@@ -635,6 +703,7 @@ enum PaymentMethod {
   Cash
   CreditCard
   MoMo
+  VNPay
   BankTransfer
 }
 
@@ -693,6 +762,22 @@ enum SupportStatus {
   InProgress
   Resolved
   Closed
+}
+
+enum SupportCategory {
+  General
+  ReviewModeration
+  AccountShop
+  MenuCatalog
+  OrderOperations
+  SettlementPayment
+  Promotions
+  Technical
+  Order
+  Delivery
+  PaymentRefund
+  Account
+  ComplaintRestaurant
 }
 
 enum DeductionType {

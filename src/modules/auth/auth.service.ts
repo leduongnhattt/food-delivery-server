@@ -1,10 +1,11 @@
 import { Injectable } from '@nestjs/common';
-import { AccountStatus } from '@prisma/client';
+import { AccountStatus, EnterpriseInvitationStatus } from '@prisma/client';
 import { AuthRepository } from '@infra/repositories/auth.repository';
 import { AuthPasswordService } from '@modules/auth/password/password.service';
 import type { Secret, SignOptions } from 'jsonwebtoken';
 import { sign as jwtSign, verify as jwtVerify } from 'jsonwebtoken';
 import { createHash, randomBytes } from 'crypto';
+import { PAYMENT_METHOD } from '@common/constants/payment-method.constants';
 
 export type JwtPayload = {
   accountId: string;
@@ -50,6 +51,63 @@ export class AuthService {
     return this.authRepo.findAccountByUsername(username);
   }
 
+  getEnterpriseLoginBlockReason(accountId: string): Promise<{
+    message: string;
+    code: string;
+  } | null> {
+    return this.enterpriseLoginGate(accountId);
+  }
+
+  private async enterpriseLoginGate(accountId: string): Promise<{
+    message: string;
+    code: string;
+  } | null> {
+    const noAccountError = {
+      message: 'No account was found for these credentials.',
+      code: 'ENTERPRISE_NO_ACCOUNT',
+    } as const;
+    const suspendedAccountError = {
+      message:
+        'This enterprise account has been suspended. Please contact support.',
+      code: 'ENTERPRISE_SUSPENDED',
+    } as const;
+
+    const loginContext =
+      await this.authRepo.findEnterpriseLoginContext(accountId);
+    if (!loginContext) {
+      return { ...noAccountError };
+    }
+
+    const enterprise = loginContext.enterprise;
+    const latestInvitation = loginContext.enterpriseInvitations[0];
+
+    if (enterprise?.DeletedAt) {
+      return { ...noAccountError, code: 'ENTERPRISE_DELETED' };
+    }
+
+    if (enterprise) {
+      if (
+        latestInvitation &&
+        latestInvitation.Status !== EnterpriseInvitationStatus.Accepted
+      ) {
+        return { ...noAccountError, code: 'ENTERPRISE_NOT_ACTIVATED' };
+      }
+      if (loginContext.Status === AccountStatus.Inactive) {
+        return { ...suspendedAccountError };
+      }
+      return null;
+    }
+
+    if (
+      !latestInvitation ||
+      latestInvitation.Status !== EnterpriseInvitationStatus.Accepted
+    ) {
+      return { ...noAccountError, code: 'ENTERPRISE_NOT_ACTIVATED' };
+    }
+
+    return { ...noAccountError, code: 'ENTERPRISE_NOT_ACTIVATED' };
+  }
+
   async createAccount(params: {
     username: string;
     email: string;
@@ -59,22 +117,15 @@ export class AuthService {
     if (!customerRole) {
       throw new Error('Customer role not found');
     }
-    const account = await this.authRepo.createAccount({
+    return this.authRepo.createAccountWithCustomerProfile({
       Username: params.username,
       Email: params.email,
       PasswordHash: params.passwordHash,
       RoleID: customerRole.RoleID,
-      Avatar: '',
-      Status: 'Active',
+      fullName: params.username,
+      address: 'Default Address',
+      preferredPaymentMethod: PAYMENT_METHOD.Cash,
     });
-    const customer = await this.authRepo.createCustomer({
-      AccountID: account.AccountID,
-      FullName: params.username,
-      PhoneNumber: '00000000000',
-      Address: 'Default Address',
-      PreferredPaymentMethod: 'Cash',
-    });
-    return { ...account, customer };
   }
 
   async createCustomer(params: {

@@ -3,6 +3,8 @@
  * Centralized under infra/templates for reuse across modules.
  */
 
+export * from './auth-email.templates';
+
 export interface GoogleCallbackMessage {
   type: string;
   credential?: string;

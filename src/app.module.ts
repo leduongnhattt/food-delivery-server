@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ScheduleModule } from '@nestjs/schedule';
 import { AppController } from '@src/app.controller';
 import { AppService } from '@src/app.service';
 import { PrismaModule } from '@infra/prisma/prisma.module';
@@ -16,9 +17,21 @@ import { HealthModule } from '@modules/health/health.module';
 import { MenuItemsModule } from '@modules/menu-items/menu-items.module';
 import { AdminModule } from '@modules/admin/admin.module';
 import { WebhooksModule } from '@modules/webhooks/webhooks.module';
+import { CategoriesModule } from '@modules/categories/categories.module';
+import { EnterpriseModule } from '@modules/enterprise/enterprise.module';
+import { SettingsModule } from '@modules/settings/settings.module';
+import { StockModule } from '@modules/stock/stock.module';
+import { RegistryModule } from '@modules/registry/registry.module';
+import { SupportModule } from '@modules/support/support.module';
+import { MailModule } from '@infra/mail/mail.module';
+import { RabbitMqModule } from '@infra/rabbitmq/rabbitmq.module';
+import { JobsModule } from '@src/jobs/jobs.module';
 
 @Module({
   imports: [
+    ScheduleModule.forRoot(),
+    MailModule,
+    RabbitMqModule,
     PrismaModule,
     StripeModule,
     FoodsModule,
@@ -28,12 +41,19 @@ import { WebhooksModule } from '@modules/webhooks/webhooks.module';
     CartModule,
     CustomersModule,
     OrdersModule,
+    JobsModule,
     PaymentsModule,
     VouchersModule,
     HealthModule,
     MenuItemsModule,
     AdminModule,
     WebhooksModule,
+    CategoriesModule,
+    EnterpriseModule,
+    SettingsModule,
+    StockModule,
+    RegistryModule,
+    SupportModule,
   ],
   controllers: [AppController],
   providers: [AppService],

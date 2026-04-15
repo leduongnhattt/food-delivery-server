@@ -38,8 +38,8 @@ export class ReviewsRepository {
   }
 
   async getEnterpriseIdByAccountId(accountId: string): Promise<string | null> {
-    const e = await this.prisma.enterprise.findUnique({
-      where: { AccountID: accountId },
+    const e = await this.prisma.enterprise.findFirst({
+      where: { AccountID: accountId, DeletedAt: null },
       select: { EnterpriseID: true },
     });
     return e?.EnterpriseID ?? null;
@@ -225,6 +225,20 @@ export class ReviewsRepository {
     return this.prisma.review.findUnique({
       where: { ReviewID: reviewId },
       select: { ReviewID: true, EnterpriseID: true },
+    });
+  }
+
+  async findVisibilityContext(reviewId: string) {
+    return this.prisma.review.findUnique({
+      where: { ReviewID: reviewId },
+      select: {
+        ReviewID: true,
+        EnterpriseID: true,
+        Rating: true,
+        Comment: true,
+        IsHidden: true,
+        CreatedAt: true,
+      },
     });
   }
 }

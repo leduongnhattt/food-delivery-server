@@ -1,8 +1,10 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
+  Patch,
   Post,
   Query,
   UseGuards,
@@ -11,13 +13,14 @@ import { JwtAuthGuard, AdminRoleGuard } from '@common/guards';
 import {
   AdminEnterprisesService,
   type CreateEnterpriseBody,
+  type UpdateEnterpriseBody,
 } from './admin-enterprises.service';
 
 @Controller('admin/enterprises')
 export class AdminEnterprisesController {
   constructor(
     private readonly adminEnterprisesService: AdminEnterprisesService,
-  ) {}
+  ) { }
 
   @Get()
   @UseGuards(JwtAuthGuard, AdminRoleGuard)
@@ -27,6 +30,27 @@ export class AdminEnterprisesController {
   ) {
     const q = this.adminEnterprisesService.parseListQuery(status, search);
     return this.adminEnterprisesService.listEnterprises(q);
+  }
+
+  @Delete(':enterpriseId')
+  @UseGuards(JwtAuthGuard, AdminRoleGuard)
+  softDelete(@Param('enterpriseId') enterpriseId: string) {
+    return this.adminEnterprisesService.softDeleteEnterprise(enterpriseId);
+  }
+
+  @Get(':enterpriseId')
+  @UseGuards(JwtAuthGuard, AdminRoleGuard)
+  detail(@Param('enterpriseId') enterpriseId: string) {
+    return this.adminEnterprisesService.getEnterpriseDetail(enterpriseId);
+  }
+
+  @Patch(':enterpriseId')
+  @UseGuards(JwtAuthGuard, AdminRoleGuard)
+  update(
+    @Param('enterpriseId') enterpriseId: string,
+    @Body() body: UpdateEnterpriseBody,
+  ) {
+    return this.adminEnterprisesService.updateEnterprise(enterpriseId, body);
   }
 
   @Post()

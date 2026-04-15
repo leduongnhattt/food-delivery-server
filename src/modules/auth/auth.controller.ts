@@ -1,4 +1,5 @@
 import { Body, Controller, Post, Req, Res } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { AuthService } from '@modules/auth/auth.service';
 import { AuthPasswordService } from '@modules/auth/password/password.service';
 import { AuthRepository } from '@infra/repositories/auth.repository';
@@ -137,12 +138,16 @@ export class AuthController {
       });
     } catch (error) {
       console.error('Registration error:', error);
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        return res.status(409).json({
+          error: 'signup.errors.registrationConflict',
+        });
+      }
       return res.status(500).json({
         error: 'signup.errors.unexpectedError',
-        message:
-          error instanceof Error
-            ? error.message
-            : 'signup.errors.unexpectedError',
       });
     }
   }
@@ -189,12 +194,21 @@ export class AuthController {
       const roleName = roleRecord?.role?.RoleName ?? 'Customer';
 
       const roleLower = (roleName || '').toLowerCase();
-      if (
-        (roleLower === 'customer' || roleLower === 'enterprise') &&
-        account.Status === 'Inactive'
-      ) {
+
+      if (roleLower === 'enterprise') {
+        const block = await this.authService.getEnterpriseLoginBlockReason(
+          account.AccountID,
+        );
+        if (block) {
+          return res.status(403).json({
+            error: block.message,
+            code: block.code,
+          });
+        }
+      } else if (roleLower === 'customer' && account.Status === 'Inactive') {
         return res.status(403).json({
           error: 'Your account is locked. Please contact support.',
+          code: 'ACCOUNT_LOCKED',
         });
       }
 

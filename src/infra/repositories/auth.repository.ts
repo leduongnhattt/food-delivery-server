@@ -1,6 +1,18 @@
 import { Injectable } from '@nestjs/common';
+import { createHash } from 'crypto';
 import { Prisma, AccountStatus, Gender, PaymentMethod } from '@prisma/client';
 import { PrismaService } from '@infra/prisma/prisma.service';
+
+/**
+ * Placeholder phone unique per account (real number should be set when the user updates profile).
+ * Shared static value (e.g. 00000000000) violates CUSTOMER_PhoneNumber_key for every signup.
+ */
+export function placeholderPhoneFromAccountId(accountId: string): string {
+  const h = createHash('sha256').update(accountId).digest('hex');
+  const n = BigInt('0x' + h.slice(0, 16));
+  const tenDigits = (n % 9000000000n) + 1000000000n;
+  return `0${tenDigits}`;
+}
 
 /**
  * Auth repository: centralizes access to Account, AuthToken, PasswordResetToken, Role, Customer.
@@ -38,6 +50,30 @@ export class AuthRepository {
         ...(options?.withCustomer && {
           customer: true,
         }),
+      },
+    });
+  }
+
+  /**
+   * Enterprise login gate: Account.Status, Enterprise.DeletedAt (soft delete),
+   * latest EnterpriseInvitation.Status (Pending | Accepted | Expired | Revoked).
+   */
+  findEnterpriseLoginContext(accountId: string) {
+    return this.prisma.account.findUnique({
+      where: { AccountID: accountId },
+      select: {
+        Status: true,
+        enterprise: {
+          select: {
+            EnterpriseID: true,
+            DeletedAt: true,
+          },
+        },
+        enterpriseInvitations: {
+          orderBy: { CreatedAt: 'desc' },
+          take: 1,
+          select: { Status: true },
+        },
       },
     });
   }
@@ -101,6 +137,58 @@ export class AuthRepository {
         role: true,
         Status: true,
       },
+    });
+  }
+
+  /**
+   * Creates Account + Customer in one transaction so a failed customer row does not leave an orphan account.
+   */
+  createAccountWithCustomerProfile(params: {
+    Username: string;
+    Email: string;
+    PasswordHash: string;
+    RoleID: string;
+    fullName: string;
+    address: string;
+    preferredPaymentMethod: PaymentMethod;
+  }) {
+    return this.prisma.$transaction(async (tx) => {
+      const account = await tx.account.create({
+        data: {
+          Username: params.Username,
+          Email: params.Email,
+          PasswordHash: params.PasswordHash,
+          RoleID: params.RoleID,
+          Avatar: '',
+          Status: AccountStatus.Active,
+          Provider: null,
+          ProviderAccountId: null,
+          EmailVerified: false,
+          LastLogin: null,
+        },
+        include: { role: true },
+      });
+      const phone = placeholderPhoneFromAccountId(account.AccountID);
+      const customer = await tx.customer.create({
+        data: {
+          AccountID: account.AccountID,
+          FullName: params.fullName,
+          PhoneNumber: phone,
+          Address: params.address,
+          PreferredPaymentMethod: params.preferredPaymentMethod,
+        },
+        select: {
+          CustomerID: true,
+          FullName: true,
+          PhoneNumber: true,
+          Address: true,
+          DateOfBirth: true,
+          Gender: true,
+          PreferredPaymentMethod: true,
+          AccountID: true,
+        },
+      });
+      return { ...account, customer };
     });
   }
 

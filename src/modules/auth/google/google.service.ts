@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { OAuth2Client } from 'google-auth-library';
 import { AuthRepository } from '@infra/repositories/auth.repository';
+import { PAYMENT_METHOD } from '@common/constants/payment-method.constants';
 
 export interface GoogleUserInfo {
   email: string;
@@ -74,7 +75,7 @@ export class AuthGoogleService {
           FullName: googleUser.name,
           PhoneNumber: '00000000000',
           Address: 'Default Address',
-          PreferredPaymentMethod: 'Cash',
+          PreferredPaymentMethod: PAYMENT_METHOD.Cash,
         });
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : '';
@@ -87,7 +88,7 @@ export class AuthGoogleService {
             FullName: googleUser.name,
             PhoneNumber: '00000000001',
             Address: 'Default Address',
-            PreferredPaymentMethod: 'Cash',
+            PreferredPaymentMethod: PAYMENT_METHOD.Cash,
           });
         } else {
           throw e;
@@ -126,7 +127,7 @@ export class AuthGoogleService {
         FullName: googleUser.name,
         PhoneNumber: phone,
         Address: 'Default Address',
-        PreferredPaymentMethod: 'Cash',
+        PreferredPaymentMethod: PAYMENT_METHOD.Cash,
       });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : '';
@@ -136,7 +137,7 @@ export class AuthGoogleService {
           FullName: googleUser.name,
           PhoneNumber: '00000000001',
           Address: 'Default Address',
-          PreferredPaymentMethod: 'Cash',
+          PreferredPaymentMethod: PAYMENT_METHOD.Cash,
         });
       } else {
         throw e;

@@ -4,9 +4,9 @@ import {
   Delete,
   Get,
   Param,
+  Query,
   Post,
   Put,
-  Query,
   Req,
   UnauthorizedException,
   BadRequestException,
@@ -40,7 +40,7 @@ export class RestaurantsController {
   constructor(
     private readonly restaurantsService: RestaurantsService,
     private readonly authService: AuthService,
-  ) {}
+  ) { }
 
   @Get()
   async list(
@@ -50,6 +50,9 @@ export class RestaurantsController {
     @Query('category') category?: string,
     @Query('isOpen') isOpenStr?: string,
     @Query('minRating') minRatingStr?: string,
+    @Query('destLat') destLatStr?: string,
+    @Query('destLng') destLngStr?: string,
+    @Query('destAddress') destAddress?: string,
   ) {
     const page = pageStr != null ? parseInt(pageStr, 10) : undefined;
     const limit = limitStr != null ? parseInt(limitStr, 10) : undefined;
@@ -58,14 +61,24 @@ export class RestaurantsController {
     const minRating =
       minRatingStr != null ? parseInt(minRatingStr, 10) : undefined;
 
-    return this.restaurantsService.findMany({
-      page: Number.isNaN(page) ? undefined : page,
-      limit: Number.isNaN(limit) ? undefined : limit,
-      search: search || undefined,
-      category: category || undefined,
-      isOpen,
-      minRating: Number.isNaN(minRating as number) ? undefined : minRating,
-    });
+    const destLat = destLatStr != null ? Number(destLatStr) : undefined;
+    const destLng = destLngStr != null ? Number(destLngStr) : undefined;
+
+    return this.restaurantsService.findMany(
+      {
+        page: Number.isNaN(page) ? undefined : page,
+        limit: Number.isNaN(limit) ? undefined : limit,
+        search: search || undefined,
+        category: category || undefined,
+        isOpen,
+        minRating: Number.isNaN(minRating as number) ? undefined : minRating,
+      },
+      {
+        address: destAddress,
+        lat: Number.isFinite(destLat as number) ? destLat : undefined,
+        lng: Number.isFinite(destLng as number) ? destLng : undefined,
+      },
+    );
   }
 
   @Get(':id/reviews')
@@ -93,8 +106,19 @@ export class RestaurantsController {
   }
 
   @Get(':id')
-  async getById(@Param('id') id: string) {
-    return this.restaurantsService.findById(id);
+  async getById(
+    @Param('id') id: string,
+    @Query('destLat') destLatStr?: string,
+    @Query('destLng') destLngStr?: string,
+    @Query('destAddress') destAddress?: string,
+  ) {
+    const destLat = destLatStr != null ? Number(destLatStr) : undefined;
+    const destLng = destLngStr != null ? Number(destLngStr) : undefined;
+    return this.restaurantsService.findById(id, {
+      address: destAddress,
+      lat: Number.isFinite(destLat as number) ? destLat : undefined,
+      lng: Number.isFinite(destLng as number) ? destLng : undefined,
+    });
   }
 
   @Post()
