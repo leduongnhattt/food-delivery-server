@@ -12,6 +12,8 @@ import {
   loadAccountCurrencyCode,
   loadEnterpriseDisplayNameFromFirstCartItem,
 } from '@modules/payments/vnpay/utils/vnpay-payment-context.lookup';
+import { invalidateEnterpriseOrderCaches } from '@modules/enterprise/orders/enterprise-order-cache.util';
+import { getKeyJson, setKeyJson } from '@infra/redis/redis.service';
 import {
   buildVnpSignablePayloadString,
   collectVnpQueryFieldsForSignature,
@@ -28,6 +30,23 @@ type VnpPayGatewayEnvConfig = {
   returnUrl: string;
 };
 
+type VnpPayAttempt = {
+  paymentId: string; // also used as vnp_TxnRef
+  accountId: string;
+  customerId: string;
+  dto: CreateCheckoutSessionRequestDto;
+  accountCurrency: string;
+  amountVnd: number;
+  exchangeRateVndPerUsd: number;
+  fxQuoteHost: string;
+  enterpriseDisplayName: string;
+  enterpriseId?: string | null;
+  createdAtIso: string;
+  status: 'created' | 'paid' | 'failed';
+  orderId?: string | null;
+  ipn?: VnpIpnQueryParams;
+};
+
 @Injectable()
 export class VnPayService {
   constructor(
@@ -35,6 +54,24 @@ export class VnPayService {
     private readonly usdVndExchangeRate: UsdVndExchangeRateService,
     private readonly etaService: EtaService,
   ) { }
+
+  private vnpAttemptKey(paymentId: string) {
+    return `vnpay:attempt:${paymentId}`;
+  }
+
+  private attemptTtlSeconds(): number {
+    const raw = process.env.VNP_ATTEMPT_TTL_SECONDS;
+    const n = raw ? Number(raw) : 60 * 60; // 1h
+    if (!Number.isFinite(n) || n <= 0) return 60 * 60;
+    return Math.floor(n);
+  }
+
+  async resolveAttempt(txnRef: string): Promise<{ found: boolean; status?: VnpPayAttempt['status']; orderId?: string | null }> {
+    if (!txnRef) return { found: false };
+    const attempt = await getKeyJson<VnpPayAttempt>(this.vnpAttemptKey(txnRef));
+    if (!attempt) return { found: false };
+    return { found: true, status: attempt.status, orderId: attempt.orderId ?? null };
+  }
 
   async createPaymentUrl(accountId: string, dto: CreateCheckoutSessionRequestDto) {
     const gatewayEnv = this.loadVnpGatewayEnv();
@@ -51,7 +88,10 @@ export class VnPayService {
         cartTotal: Number(dto.total),
         accountCurrency,
       });
-    const { orderId, paymentId } = await this.persistPendingVnpOrderAndPayment({
+    const paymentId = crypto.randomUUID();
+    const enterpriseId = dto.cartItems?.[0]?.menuItem?.restaurantId;
+    const attempt: VnpPayAttempt = {
+      paymentId,
       accountId,
       customerId,
       dto,
@@ -60,31 +100,22 @@ export class VnPayService {
       exchangeRateVndPerUsd,
       fxQuoteHost,
       enterpriseDisplayName,
-    });
-
-    const enterpriseId = dto.cartItems?.[0]?.menuItem?.restaurantId;
-    if (enterpriseId) {
-      await this.etaService.computeAndPersistForOrder({
-        orderId,
-        enterpriseId,
-        deliveryInfo: {
-          address: dto.deliveryInfo.address,
-          lat: dto.deliveryInfo.lat,
-          lng: dto.deliveryInfo.lng,
-        },
-      }).catch(() => undefined);
-    }
+      enterpriseId: enterpriseId || null,
+      createdAtIso: new Date().toISOString(),
+      status: 'created',
+      orderId: null,
+    };
+    await setKeyJson(this.vnpAttemptKey(paymentId), attempt, this.attemptTtlSeconds());
 
     const paymentRedirectUrl = this.buildSignedVnpPaymentRedirectUrl(gatewayEnv, {
-      orderId,
       paymentId,
       amountVnd,
       orderDescription: sanitizeVnpOrderDescription(
-        `Payment at ${enterpriseDisplayName} — Order ${orderId}`,
+        `Payment at ${enterpriseDisplayName} — Txn ${paymentId}`,
       ),
     });
 
-    return { url: paymentRedirectUrl, orderId, paymentId };
+    return { url: paymentRedirectUrl, paymentId };
   }
 
   private loadVnpGatewayEnv(): VnpPayGatewayEnvConfig {
@@ -153,32 +184,12 @@ export class VnPayService {
     };
   }
 
-  private async persistPendingVnpOrderAndPayment(params: {
-    accountId: string;
-    customerId: string;
-    dto: CreateCheckoutSessionRequestDto;
-    accountCurrency: string;
-    amountVnd: number;
-    exchangeRateVndPerUsd: number;
-    fxQuoteHost: string;
-    enterpriseDisplayName: string;
-  }): Promise<{ orderId: string; paymentId: string }> {
-    const paymentId = crypto.randomUUID();
-    const {
-      dto,
-      accountId,
-      customerId,
-      accountCurrency,
-      amountVnd,
-      exchangeRateVndPerUsd,
-      fxQuoteHost,
-      enterpriseDisplayName,
-    } = params;
-
-    const created = await this.prisma.$transaction(async (tx) => {
-      return tx.order.create({
+  private async createOrderAfterVnpSuccess(attempt: VnpPayAttempt, ipnQuery: VnpIpnQueryParams): Promise<string> {
+    const dto = attempt.dto;
+    const createdOrderId = await this.prisma.$transaction(async (tx) => {
+      const order = await tx.order.create({
         data: {
-          CustomerID: customerId,
+          CustomerID: attempt.customerId,
           VoucherID: null,
           TotalAmount: dto.total,
           DeliveryAddress: dto.deliveryInfo.address,
@@ -186,15 +197,15 @@ export class VnPayService {
           Status: ORDER_STATUS.Pending,
           Metadata: {
             provider: PAYMENT_PROVIDER.VnPay,
-            accountId,
+            accountId: attempt.accountId,
             voucherCode: dto.voucherCode || null,
             phone: dto.deliveryInfo.phone || null,
-            currency: accountCurrency,
+            currency: attempt.accountCurrency,
             vnpay: {
-              enterpriseName: enterpriseDisplayName,
-              amountVnd,
-              usdToVndRate: exchangeRateVndPerUsd,
-              fxQuoteHost,
+              enterpriseName: attempt.enterpriseDisplayName,
+              amountVnd: attempt.amountVnd,
+              usdToVndRate: attempt.exchangeRateVndPerUsd,
+              fxQuoteHost: attempt.fxQuoteHost,
             },
           },
           orderDetails: {
@@ -204,35 +215,52 @@ export class VnPayService {
               Quantity: item.quantity,
             })),
           },
-          payments: {
-            create: {
-              PaymentID: paymentId,
-              PaymentStatus: PAYMENT_STATUS.Pending,
-              PaymentMethod: PAYMENT_METHOD.VNPay,
-              TransactionID: paymentId,
-              TransactionData: {
-                provider: PAYMENT_PROVIDER.VnPay,
-                createdAt: new Date().toISOString(),
-                enterpriseName: enterpriseDisplayName,
-                currency: accountCurrency,
-                amountVnd,
-                usdToVndRate: exchangeRateVndPerUsd,
-                fxQuoteHost,
-              },
-            },
-          },
         },
         select: { OrderID: true },
       });
+
+      await tx.payment.create({
+        data: {
+          PaymentID: attempt.paymentId,
+          OrderID: order.OrderID,
+          PaymentStatus: PAYMENT_STATUS.Completed,
+          PaymentMethod: PAYMENT_METHOD.VNPay,
+          TransactionID: attempt.paymentId,
+          TransactionData: {
+            provider: PAYMENT_PROVIDER.VnPay,
+            createdAt: attempt.createdAtIso,
+            ipn: ipnQuery,
+            enterpriseName: attempt.enterpriseDisplayName,
+            currency: attempt.accountCurrency,
+            amountVnd: attempt.amountVnd,
+            usdToVndRate: attempt.exchangeRateVndPerUsd,
+            fxQuoteHost: attempt.fxQuoteHost,
+          },
+        },
+      });
+
+      return order.OrderID;
     });
 
-    return { orderId: created.OrderID, paymentId };
+    if (attempt.enterpriseId) {
+      await this.etaService.computeAndPersistForOrder({
+        orderId: createdOrderId,
+        enterpriseId: attempt.enterpriseId,
+        deliveryInfo: {
+          address: attempt.dto.deliveryInfo.address,
+          lat: attempt.dto.deliveryInfo.lat,
+          lng: attempt.dto.deliveryInfo.lng,
+        },
+      }).catch(() => undefined);
+      await invalidateEnterpriseOrderCaches(attempt.enterpriseId).catch(() => undefined);
+    }
+
+    return createdOrderId;
   }
 
   private buildSignedVnpPaymentRedirectUrl(
     gatewayEnv: VnpPayGatewayEnvConfig,
     input: {
-      orderId: string;
       paymentId: string;
       amountVnd: number;
       orderDescription: string;
@@ -280,18 +308,24 @@ export class VnPayService {
     };
   }
 
-  verifyReturnQuery(query: VnpIpnQueryParams): {
+  async verifyReturnQuery(query: VnpIpnQueryParams): Promise<{
     valid: boolean;
     txnRef?: string;
     responseCode?: string;
     transactionStatus?: string;
-  } {
+    orderId?: string | null;
+    attemptStatus?: VnpPayAttempt['status'];
+  }> {
     const { isValid } = this.verifySecureHash(query);
+    const txnRef = query.vnp_TxnRef;
+    const attempt = txnRef ? await getKeyJson<VnpPayAttempt>(this.vnpAttemptKey(txnRef)) : null;
     return {
       valid: isValid,
-      txnRef: query.vnp_TxnRef,
+      txnRef,
       responseCode: query.vnp_ResponseCode,
       transactionStatus: query.vnp_TransactionStatus,
+      orderId: attempt?.orderId ?? null,
+      attemptStatus: attempt?.status,
     };
   }
 
@@ -307,51 +341,30 @@ export class VnPayService {
 
     if (!txnRef) return { RspCode: '01', Message: 'Missing vnp_TxnRef' };
 
-    const payment = await this.prisma.payment.findUnique({
-      where: { TransactionID: txnRef },
-      select: {
-        PaymentID: true,
-        OrderID: true,
-        PaymentStatus: true,
-        TransactionData: true,
-      },
-    });
-    if (!payment) return { RspCode: '01', Message: 'Payment not found' };
-
-    if (
-      payment.PaymentStatus === PAYMENT_STATUS.Completed ||
-      payment.PaymentStatus === PAYMENT_STATUS.Failed
-    ) {
+    const attemptKey = this.vnpAttemptKey(txnRef);
+    const attempt = await getKeyJson<VnpPayAttempt>(attemptKey);
+    if (!attempt) return { RspCode: '01', Message: 'Payment not found' };
+    if (attempt.status === 'paid' && attempt.orderId) {
       return { RspCode: '00', Message: 'OK' };
     }
 
     const isPaidOk = responseCode === '00' && transactionStatus === '00';
 
-    const priorTx =
-      payment.TransactionData &&
-      typeof payment.TransactionData === 'object' &&
-      !Array.isArray(payment.TransactionData)
-        ? (payment.TransactionData as Record<string, unknown>)
-        : {};
+    if (!isPaidOk) {
+      await setKeyJson(
+        attemptKey,
+        { ...attempt, status: 'failed', ipn: query } satisfies VnpPayAttempt,
+        this.attemptTtlSeconds(),
+      );
+      return { RspCode: '00', Message: 'OK' };
+    }
 
-    await this.prisma.$transaction(async (tx) => {
-      await tx.payment.update({
-        where: { PaymentID: payment.PaymentID },
-        data: {
-          PaymentStatus: isPaidOk ? PAYMENT_STATUS.Completed : PAYMENT_STATUS.Failed,
-          TransactionData: {
-            ...priorTx,
-            provider: PAYMENT_PROVIDER.VnPay,
-            ipn: query,
-            updatedAt: new Date().toISOString(),
-          },
-        },
-      });
-      await tx.order.update({
-        where: { OrderID: payment.OrderID },
-        data: { Status: isPaidOk ? ORDER_STATUS.Confirmed : ORDER_STATUS.Cancelled },
-      });
-    });
+    const orderId = await this.createOrderAfterVnpSuccess(attempt, query);
+    await setKeyJson(
+      attemptKey,
+      { ...attempt, status: 'paid', orderId, ipn: query } satisfies VnpPayAttempt,
+      this.attemptTtlSeconds(),
+    );
 
     return { RspCode: '00', Message: 'OK' };
   }

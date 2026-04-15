@@ -9,7 +9,10 @@ import {
 } from '@infra/repositories/orders.repository';
 import { CustomersService } from '@modules/customers/customers.service';
 import { PAYMENT_METHOD } from '@common/constants/payment-method.constants';
+import { ORDER_CANCEL_REASON } from '@common/constants/order-payment-status.constants';
+import { deleteKey } from '@infra/redis/redis.service';
 import { EtaService } from '@modules/shipping/eta.service';
+import { invalidateEnterpriseOrderCaches } from '@modules/enterprise/orders/enterprise-order-cache.util';
 
 type FoodWithImageURL = {
   ImageURL?: string | null;
@@ -44,12 +47,16 @@ export interface OrderDto {
   items: OrderItemDto[];
   totalAmount: number;
   status: string;
+  cancelReason?: string | null;
+  refundPending?: boolean;
   deliveryAddress: string;
   deliveryInstructions?: string;
   paymentMethod: string;
+  paymentStatus?: string | null;
   createdAt: string;
   updatedAt: string;
   estimatedDeliveryTime?: string;
+  expiresAt?: string | null;
 }
 
 export interface OrdersListResponse {
@@ -136,6 +143,13 @@ export class OrdersService {
         specialInstructions: undefined,
       }));
 
+      const latestPayment = order.payments?.[0];
+      const meta =
+        order.Metadata && typeof order.Metadata === 'object' && !Array.isArray(order.Metadata)
+          ? (order.Metadata as Record<string, unknown>)
+          : {};
+      const expiresAt = new Date(order.OrderDate.getTime() + 30 * 60 * 1000).toISOString();
+
       return {
         id: order.OrderID,
         customerId: order.CustomerID,
@@ -147,12 +161,18 @@ export class OrdersService {
         items,
         totalAmount: Number(order.TotalAmount),
         status: String(order.Status).toLowerCase(),
+        cancelReason: typeof meta.cancelReason === 'string' ? meta.cancelReason : null,
+        refundPending: Boolean(meta.refundPending),
         deliveryAddress: order.DeliveryAddress,
         deliveryInstructions: order.DeliveryNote ?? undefined,
         paymentMethod: 'card',
+        paymentStatus: latestPayment?.PaymentStatus
+          ? String(latestPayment.PaymentStatus).toLowerCase()
+          : null,
         createdAt: order.OrderDate.toISOString(),
         updatedAt: order.OrderDate.toISOString(),
         estimatedDeliveryTime: order.EstimatedDeliveryTime?.toISOString(),
+        expiresAt,
       };
     });
 
@@ -189,6 +209,13 @@ export class OrdersService {
       specialInstructions: od.food.Description || undefined,
     }));
 
+    const latestPayment = order.payments?.[0];
+    const meta =
+      order.Metadata && typeof order.Metadata === 'object' && !Array.isArray(order.Metadata)
+        ? (order.Metadata as Record<string, any>)
+        : {};
+    const expiresAt = new Date(order.OrderDate.getTime() + 30 * 60 * 1000).toISOString();
+
     return {
       id: order.OrderID,
       customerId: order.CustomerID,
@@ -200,13 +227,17 @@ export class OrdersService {
       items,
       totalAmount: Number(order.TotalAmount),
       status: String(order.Status).toLowerCase(),
+      cancelReason: typeof meta.cancelReason === 'string' ? meta.cancelReason : null,
+      refundPending: Boolean(meta.refundPending),
       deliveryAddress: order.DeliveryAddress,
       deliveryInstructions: order.DeliveryNote || undefined,
       paymentMethod:
         order.payments[0]?.PaymentMethod || PAYMENT_METHOD.CreditCard,
+      paymentStatus: latestPayment?.PaymentStatus ? String(latestPayment.PaymentStatus).toLowerCase() : null,
       createdAt: order.OrderDate.toISOString(),
       updatedAt: new Date().toISOString(),
       estimatedDeliveryTime: order.EstimatedDeliveryTime?.toISOString(),
+      expiresAt,
     };
   }
 
@@ -219,16 +250,40 @@ export class OrdersService {
       throw new NotFoundException('Customer not found');
     }
 
-    const order = await this.repo.findForOwnershipCheck(orderId);
-    if (!order || order.CustomerID !== customer.CustomerID) {
+    const ctx = await this.repo.findCancelContextForCustomer(orderId);
+    if (!ctx || ctx.CustomerID !== customer.CustomerID) {
       throw new NotFoundException('Order not found');
     }
 
-    if ((order.Status || '').toLowerCase() !== 'pending') {
+    if ((ctx.Status || '').toLowerCase() !== 'pending') {
       throw new BadRequestException('Only pending orders can be cancelled');
     }
 
-    await this.repo.deleteOrderCascade(orderId);
+    const latest = ctx.payments?.[0];
+    const refundPending =
+      latest?.PaymentStatus === 'Completed' && latest?.PaymentMethod !== 'Cash';
+
+    const { updated, enterpriseIds } = await this.repo.cancelPendingOrder({
+      orderId,
+      cancelReason: ORDER_CANCEL_REASON.CustomerCancelled,
+      refundPending,
+    });
+
+    if (!updated) {
+      // If the order was updated by another actor (enterprise/cron), treat as success for idempotency.
+      return { success: true };
+    }
+
+    await Promise.all(
+      enterpriseIds.flatMap((eid) => {
+        const orders = `enterprise:${eid}:orders:v3`;
+        const recent = `enterprise:${eid}:recent_orders:v3`;
+        const stats = `enterprise:${eid}:stats`;
+        const revenue = `enterprise:${eid}:revenue`;
+        return [deleteKey(orders), deleteKey(recent), deleteKey(stats), deleteKey(revenue)];
+      }),
+    );
+
     return { success: true };
   }
 
@@ -380,6 +435,9 @@ export class OrdersService {
           },
         })
         .catch(() => undefined);
+
+      // Ensure enterprise dashboard shows the new pending order immediately.
+      await invalidateEnterpriseOrderCaches(enterpriseId).catch(() => undefined);
     }
 
     // TODO: clear cart after order creation if needed

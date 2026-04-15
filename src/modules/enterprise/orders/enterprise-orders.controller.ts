@@ -6,6 +6,7 @@ import {
   Get,
   Param,
   Patch,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '@common/guards';
@@ -28,9 +29,12 @@ export class EnterpriseOrdersController {
 
   @Get()
   @UseGuards(JwtAuthGuard)
-  async list(@CurrentAccount() account: JwtPayload | null) {
+  async list(
+    @CurrentAccount() account: JwtPayload | null,
+    @Query('force') force?: string,
+  ) {
     this.assertEnterprise(account);
-    return this.service.list(account.accountId);
+    return this.service.list(account.accountId, { force: force === '1' || force === 'true' });
   }
 
   @Get('recent')
