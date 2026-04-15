@@ -18,3 +18,10 @@ export const PAYMENT_STATUS = {
   Failed: PaymentStatus.Failed,
 } as const;
 
+export const ORDER_CANCEL_REASON = {
+  AcceptTimeout: 'accept_timeout',
+  EnterpriseCancelled: 'enterprise_cancelled',
+  CustomerCancelled: 'customer_cancelled',
+  PaymentFailed: 'payment_failed',
+} as const;
+

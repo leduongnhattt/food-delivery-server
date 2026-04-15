@@ -115,12 +115,28 @@ export class PaymentsController {
         return this.vnpay.createPaymentUrl(decoded.accountId, body);
     }
 
+  /**
+   * VNPAY IPN endpoint (server-to-server). Public: security is the HMAC signature.
+   */
+  @Get('vnpay/ipn')
+  vnpayIpn(@Query() query: Record<string, string | undefined>) {
+    return this.vnpay.handleIpn(query);
+  }
+
+  /**
+   * Resolve a VNPAY attempt (txnRef) to an orderId (once created by IPN).
+   */
+  @Get('vnpay/resolve')
+  vnpayResolve(@Query('txnRef') txnRef: string) {
+    return this.vnpay.resolveAttempt(txnRef);
+  }
+
     /**
      * Verify return-URL query (browser redirect from VNPAY). Public: security is the HMAC itself.
      * Client should pass all `vnp_*` query params unchanged.
      */
     @Get('vnpay/verify-return')
-    verifyVnPayReturn(@Query() query: Record<string, string | undefined>) {
+  verifyVnPayReturn(@Query() query: Record<string, string | undefined>) {
         return this.vnpay.verifyReturnQuery(query);
     }
 }
