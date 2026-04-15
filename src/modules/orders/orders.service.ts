@@ -143,10 +143,10 @@ export class OrdersService {
         specialInstructions: undefined,
       }));
 
-      const latestPayment = (order as any).payments?.[0];
+      const latestPayment = order.payments?.[0];
       const meta =
         order.Metadata && typeof order.Metadata === 'object' && !Array.isArray(order.Metadata)
-          ? (order.Metadata as Record<string, any>)
+          ? (order.Metadata as Record<string, unknown>)
           : {};
       const expiresAt = new Date(order.OrderDate.getTime() + 30 * 60 * 1000).toISOString();
 
@@ -166,7 +166,9 @@ export class OrdersService {
         deliveryAddress: order.DeliveryAddress,
         deliveryInstructions: order.DeliveryNote ?? undefined,
         paymentMethod: 'card',
-        paymentStatus: latestPayment?.PaymentStatus ? String(latestPayment.PaymentStatus).toLowerCase() : null,
+        paymentStatus: latestPayment?.PaymentStatus
+          ? String(latestPayment.PaymentStatus).toLowerCase()
+          : null,
         createdAt: order.OrderDate.toISOString(),
         updatedAt: order.OrderDate.toISOString(),
         estimatedDeliveryTime: order.EstimatedDeliveryTime?.toISOString(),

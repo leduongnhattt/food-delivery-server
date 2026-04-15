@@ -5,6 +5,32 @@ import type { OrderCartItemDto } from '@modules/orders/orders.service';
 import { ORDER_STATUS, PAYMENT_STATUS } from '@common/constants/order-payment-status.constants';
 import { PAYMENT_METHOD } from '@common/constants/payment-method.constants';
 
+export type OrderForCustomerList = Prisma.OrderGetPayload<{
+  include: {
+    orderDetails: {
+      include: {
+        food: {
+          select: {
+            FoodID: true;
+            DishName: true;
+            Price: true;
+            ImageURL: true;
+            EnterpriseID: true;
+            enterprise: {
+              select: {
+                EnterpriseName: true;
+                account: { select: { Avatar: true } };
+              };
+            };
+          };
+        };
+      };
+    };
+    customer: { select: { FullName: true } };
+    payments: true;
+  };
+}>;
+
 export interface OrderListCriteria {
   customerId: string;
   status?: string;
@@ -44,7 +70,9 @@ export class OrdersRepository {
     });
   }
 
-  async findManyForCustomer(criteria: OrderListCriteria) {
+  async findManyForCustomer(
+    criteria: OrderListCriteria,
+  ): Promise<{ rows: OrderForCustomerList[]; total: number; page: number; limit: number }> {
     const { page, limit, skip } = this.normalizePagination(
       criteria.page,
       criteria.limit,

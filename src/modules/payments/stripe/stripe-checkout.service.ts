@@ -3,11 +3,7 @@ import Stripe from 'stripe';
 import { PrismaService } from '@infra/prisma/prisma.service';
 import { StripeService } from '@infra/stripe/stripe.service';
 import type { CreateCheckoutSessionRequestDto } from '@modules/payments/dto';
-import { PAYMENT_STATUS } from '@common/constants/order-payment-status.constants';
-import { PAYMENT_PROVIDER } from '@common/constants/payment-provider.constants';
-import { PAYMENT_METHOD } from '@common/constants/payment-method.constants';
 import { EtaService } from '@modules/shipping/eta.service';
-import { invalidateEnterpriseOrderCaches } from '@modules/enterprise/orders/enterprise-order-cache.util';
 import crypto from 'crypto';
 import { setKeyJson } from '@infra/redis/redis.service';
 
@@ -39,7 +35,7 @@ export class StripeCheckoutService {
     }
 
     private isAbsoluteHttpUrl(input: unknown): boolean {
-        const v = String(input ?? '').trim();
+        const v = typeof input === 'string' ? input.trim() : '';
         return /^https?:\/\/.+/i.test(v);
     }
 
@@ -51,7 +47,7 @@ export class StripeCheckoutService {
     }
 
     private pickStripeProductImages(input: unknown): string[] {
-        const candidate = String(input ?? '').trim();
+        const candidate = typeof input === 'string' ? input.trim() : '';
         // Stripe requires absolute http(s) URLs. Treat relative placeholders as "no image".
         if (this.isAbsoluteHttpUrl(candidate)) return [candidate];
         return [this.getDefaultProductImageUrl()];

@@ -15,11 +15,33 @@ import { PAYMENT_METHOD } from '@common/constants/payment-method.constants';
 import { getKeyJson, setKeyJson } from '@infra/redis/redis.service';
 import { EtaService } from '@modules/shipping/eta.service';
 import { invalidateEnterpriseOrderCaches } from '@modules/enterprise/orders/enterprise-order-cache.util';
+import type { CreateCheckoutSessionRequestDto } from '@modules/payments/dto';
 
 /** Cart item with food and enterprise (from Prisma findMany include). */
 type CartItemWithFood = Prisma.CartItemGetPayload<{
     include: { food: { include: { enterprise: true } } };
 }>;
+
+type StripeAttempt = {
+    attemptId: string;
+    accountId: string;
+    customerId?: string;
+    enterpriseId?: string | null;
+    dto: CreateCheckoutSessionRequestDto;
+    createdAtIso?: string;
+    orderId?: string;
+};
+
+function isStripeAttempt(value: unknown): value is StripeAttempt {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+    const v = value as Record<string, unknown>;
+    return (
+        typeof v.attemptId === 'string' &&
+        typeof v.accountId === 'string' &&
+        typeof v.dto === 'object' &&
+        v.dto !== null
+    );
+}
 
 /** Time window to detect duplicate order (same customer, amount, status). */
 // const DUPLICATE_ORDER_WINDOW_MS = 5 * 60 * 1000;
@@ -58,8 +80,8 @@ export class CheckoutSuccessService {
             throw new BadRequestException('Payment not completed');
         }
 
-        const metadata = session.metadata || {};
-        const attemptId = (metadata.attemptId as string) || '';
+        const metadata = session.metadata ?? {};
+        const attemptId = metadata.attemptId ?? '';
         if (!attemptId) throw new BadRequestException('Missing attempt metadata');
 
         const customer = await this.prisma.customer.findFirst({
@@ -76,17 +98,21 @@ export class CheckoutSuccessService {
             throw new NotFoundException('Customer not found');
         }
 
-        const attempt = await getKeyJson<any>(this.stripeAttemptKey(attemptId));
-        if (!attempt || attempt.accountId !== accountId) {
+        const attemptRaw = await getKeyJson<unknown>(this.stripeAttemptKey(attemptId));
+        if (!isStripeAttempt(attemptRaw) || attemptRaw.accountId !== accountId) {
             throw new NotFoundException('Payment attempt not found');
         }
+        const attempt = attemptRaw;
 
         if (attempt.orderId) {
             await this.clearCartForAccount(accountId);
             return { orderId: attempt.orderId, success: true, cartCleared: true };
         }
 
-        const dto = attempt.dto as { cartItems: any[]; deliveryInfo: any; voucherCode?: string; total: number };
+        const dto = attempt.dto;
+        if (!Array.isArray(dto.cartItems) || dto.cartItems.length === 0) {
+            throw new BadRequestException('Invalid attempt payload (missing cartItems)');
+        }
         const amountTotal = typeof session.amount_total === 'number' ? session.amount_total : null;
 
         const createdOrderId = await this.prisma.$transaction(async (tx) => {
@@ -144,7 +170,7 @@ export class CheckoutSuccessService {
 
         await setKeyJson(this.stripeAttemptKey(attemptId), { ...attempt, orderId: createdOrderId }, 60 * 60);
 
-        const enterpriseId = attempt.enterpriseId as string | null | undefined;
+        const enterpriseId = attempt.enterpriseId;
         if (enterpriseId) {
             await this.etaService.computeAndPersistForOrder({
                 orderId: createdOrderId,
@@ -186,8 +212,8 @@ export class CheckoutSuccessService {
         }
 
         const session = await this.stripeCheckout.retrieveSession(sessionId);
-        const metadata = session.metadata || {};
-        const attemptId = (metadata.attemptId as string) || '';
+        const metadata = session.metadata ?? {};
+        const attemptId = metadata.attemptId ?? '';
         if (!attemptId) {
             throw new BadRequestException('Missing attempt metadata');
         }
@@ -199,8 +225,8 @@ export class CheckoutSuccessService {
         if (!customer) {
             throw new NotFoundException('Customer not found');
         }
-        const attempt = await getKeyJson<any>(this.stripeAttemptKey(attemptId));
-        const orderId = (attempt?.orderId as string) || '';
+        const attemptRaw = await getKeyJson<unknown>(this.stripeAttemptKey(attemptId));
+        const orderId = isStripeAttempt(attemptRaw) ? (attemptRaw.orderId ?? '') : '';
         if (!orderId) {
             return {
                 sessionId,
