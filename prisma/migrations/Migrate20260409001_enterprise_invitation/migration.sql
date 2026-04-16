@@ -1,0 +1,23 @@
+-- Enterprise invitation table (needed before engagement events FK).
+
+CREATE TABLE `ENTERPRISE_INVITATION` (
+  `InvitationID` VARCHAR(36) NOT NULL,
+  `AccountID` VARCHAR(36) NOT NULL,
+  `Email` VARCHAR(100) NOT NULL,
+  `PhoneNumber` VARCHAR(15) NOT NULL,
+  `EnterpriseNameDraft` VARCHAR(100) NULL,
+  `TokenHash` VARCHAR(255) NOT NULL,
+  `ExpiresAt` DATETIME(3) NOT NULL,
+  `Status` ENUM('Pending', 'Accepted', 'Expired', 'Revoked') NOT NULL DEFAULT 'Pending',
+  `AcceptedAt` DATETIME(3) NULL,
+  `CreatedAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `UpdatedAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (`InvitationID`),
+  INDEX `ENTERPRISE_INVITATION_AccountID_idx` (`AccountID`),
+  INDEX `ENTERPRISE_INVITATION_Email_idx` (`Email`),
+  INDEX `ENTERPRISE_INVITATION_PhoneNumber_idx` (`PhoneNumber`),
+  INDEX `ENTERPRISE_INVITATION_ExpiresAt_idx` (`ExpiresAt`),
+  INDEX `ENTERPRISE_INVITATION_Status_idx` (`Status`),
+  CONSTRAINT `ENTERPRISE_INVITATION_AccountID_fkey` FOREIGN KEY (`AccountID`) REFERENCES `ACCOUNT`(`AccountID`) ON DELETE CASCADE ON UPDATE CASCADE
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
