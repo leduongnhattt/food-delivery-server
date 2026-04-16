@@ -1,6 +1,6 @@
 -- Enterprise invitation table (needed before engagement events FK).
 
-CREATE TABLE `ENTERPRISE_INVITATION` (
+CREATE TABLE IF NOT EXISTS `ENTERPRISE_INVITATION` (
   `InvitationID` VARCHAR(36) NOT NULL,
   `AccountID` VARCHAR(36) NOT NULL,
   `Email` VARCHAR(100) NOT NULL,

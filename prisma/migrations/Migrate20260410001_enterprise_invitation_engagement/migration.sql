@@ -1,5 +1,28 @@
 -- Track enterprise invitation email opens and activation link clicks for admin timeline & stats.
 
+-- Defensive: ensure referenced table exists in shadow DB replays.
+-- Some MySQL setups + shadow DB replay ordering can surface missing-table FK errors.
+CREATE TABLE IF NOT EXISTS `ENTERPRISE_INVITATION` (
+  `InvitationID` VARCHAR(36) NOT NULL,
+  `AccountID` VARCHAR(36) NOT NULL,
+  `Email` VARCHAR(100) NOT NULL,
+  `PhoneNumber` VARCHAR(15) NOT NULL,
+  `EnterpriseNameDraft` VARCHAR(100) NULL,
+  `TokenHash` VARCHAR(255) NOT NULL,
+  `ExpiresAt` DATETIME(3) NOT NULL,
+  `Status` ENUM('Pending', 'Accepted', 'Expired', 'Revoked') NOT NULL DEFAULT 'Pending',
+  `AcceptedAt` DATETIME(3) NULL,
+  `CreatedAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `UpdatedAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (`InvitationID`),
+  INDEX `ENTERPRISE_INVITATION_AccountID_idx` (`AccountID`),
+  INDEX `ENTERPRISE_INVITATION_Email_idx` (`Email`),
+  INDEX `ENTERPRISE_INVITATION_PhoneNumber_idx` (`PhoneNumber`),
+  INDEX `ENTERPRISE_INVITATION_ExpiresAt_idx` (`ExpiresAt`),
+  INDEX `ENTERPRISE_INVITATION_Status_idx` (`Status`),
+  CONSTRAINT `ENTERPRISE_INVITATION_AccountID_fkey` FOREIGN KEY (`AccountID`) REFERENCES `ACCOUNT`(`AccountID`) ON DELETE CASCADE ON UPDATE CASCADE
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
 CREATE TABLE `ENTERPRISE_INVITATION_ENGAGEMENT_EVENT` (
   `EventID` VARCHAR(36) NOT NULL,
   `InvitationID` VARCHAR(36) NOT NULL,
