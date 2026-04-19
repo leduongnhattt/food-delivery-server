@@ -49,6 +49,10 @@ export interface OrderDto {
   status: string;
   cancelReason?: string | null;
   refundPending?: boolean;
+  deliveredAt?: string | null;
+  returnRequestStatus?: string | null;
+  statusHistory?: Array<{ status: string; at: string; actor?: string }> | null;
+  cancelledAt?: string | null;
   deliveryAddress: string;
   deliveryInstructions?: string;
   paymentMethod: string;
@@ -145,10 +149,14 @@ export class OrdersService {
 
       const latestPayment = order.payments?.[0];
       const meta =
-        order.Metadata && typeof order.Metadata === 'object' && !Array.isArray(order.Metadata)
+        order.Metadata &&
+        typeof order.Metadata === 'object' &&
+        !Array.isArray(order.Metadata)
           ? (order.Metadata as Record<string, unknown>)
           : {};
-      const expiresAt = new Date(order.OrderDate.getTime() + 30 * 60 * 1000).toISOString();
+      const expiresAt = new Date(
+        order.OrderDate.getTime() + 30 * 60 * 1000,
+      ).toISOString();
 
       return {
         id: order.OrderID,
@@ -161,8 +169,16 @@ export class OrdersService {
         items,
         totalAmount: Number(order.TotalAmount),
         status: String(order.Status).toLowerCase(),
-        cancelReason: typeof meta.cancelReason === 'string' ? meta.cancelReason : null,
+        cancelReason:
+          typeof meta.cancelReason === 'string' ? meta.cancelReason : null,
         refundPending: Boolean(meta.refundPending),
+        deliveredAt: order.DeliveredAt?.toISOString() ?? null,
+        returnRequestStatus: order.returnRequest?.Status ?? null,
+        statusHistory: Array.isArray(meta.statusHistory)
+          ? meta.statusHistory
+          : null,
+        cancelledAt:
+          typeof meta.cancelledAt === 'string' ? meta.cancelledAt : null,
         deliveryAddress: order.DeliveryAddress,
         deliveryInstructions: order.DeliveryNote ?? undefined,
         paymentMethod: 'card',
@@ -211,10 +227,14 @@ export class OrdersService {
 
     const latestPayment = order.payments?.[0];
     const meta =
-      order.Metadata && typeof order.Metadata === 'object' && !Array.isArray(order.Metadata)
-        ? (order.Metadata as Record<string, any>)
+      order.Metadata &&
+      typeof order.Metadata === 'object' &&
+      !Array.isArray(order.Metadata)
+        ? (order.Metadata as Record<string, unknown>)
         : {};
-    const expiresAt = new Date(order.OrderDate.getTime() + 30 * 60 * 1000).toISOString();
+    const expiresAt = new Date(
+      order.OrderDate.getTime() + 30 * 60 * 1000,
+    ).toISOString();
 
     return {
       id: order.OrderID,
@@ -227,13 +247,23 @@ export class OrdersService {
       items,
       totalAmount: Number(order.TotalAmount),
       status: String(order.Status).toLowerCase(),
-      cancelReason: typeof meta.cancelReason === 'string' ? meta.cancelReason : null,
-      refundPending: Boolean(meta.refundPending),
+      cancelReason:
+        typeof meta['cancelReason'] === 'string' ? meta['cancelReason'] : null,
+      refundPending: Boolean(meta['refundPending']),
+      deliveredAt: order.DeliveredAt?.toISOString() ?? null,
+      returnRequestStatus: order.returnRequest?.Status ?? null,
+      statusHistory: Array.isArray(meta['statusHistory'])
+        ? (meta['statusHistory'] as OrderDto['statusHistory'])
+        : null,
+      cancelledAt:
+        typeof meta['cancelledAt'] === 'string' ? meta['cancelledAt'] : null,
       deliveryAddress: order.DeliveryAddress,
       deliveryInstructions: order.DeliveryNote || undefined,
       paymentMethod:
         order.payments[0]?.PaymentMethod || PAYMENT_METHOD.CreditCard,
-      paymentStatus: latestPayment?.PaymentStatus ? String(latestPayment.PaymentStatus).toLowerCase() : null,
+      paymentStatus: latestPayment?.PaymentStatus
+        ? String(latestPayment.PaymentStatus).toLowerCase()
+        : null,
       createdAt: order.OrderDate.toISOString(),
       updatedAt: new Date().toISOString(),
       estimatedDeliveryTime: order.EstimatedDeliveryTime?.toISOString(),
@@ -280,7 +310,12 @@ export class OrdersService {
         const recent = `enterprise:${eid}:recent_orders:v3`;
         const stats = `enterprise:${eid}:stats`;
         const revenue = `enterprise:${eid}:revenue`;
-        return [deleteKey(orders), deleteKey(recent), deleteKey(stats), deleteKey(revenue)];
+        return [
+          deleteKey(orders),
+          deleteKey(recent),
+          deleteKey(stats),
+          deleteKey(revenue),
+        ];
       }),
     );
 
@@ -318,8 +353,7 @@ export class OrdersService {
     // Prefer persisted ETA (computed at order creation) regardless of status.
     if (order.EstimatedDeliveryTime) {
       estimatedDeliveryTime = order.EstimatedDeliveryTime;
-    } else
-    if (status === 'Pending') {
+    } else if (status === 'Pending') {
       estimatedDeliveryTime = new Date(orderTime.getTime() + 45 * 60000);
     } else if (status === 'Completed') {
       estimatedDeliveryTime = order.EstimatedDeliveryTime ?? null;
@@ -437,7 +471,9 @@ export class OrdersService {
         .catch(() => undefined);
 
       // Ensure enterprise dashboard shows the new pending order immediately.
-      await invalidateEnterpriseOrderCaches(enterpriseId).catch(() => undefined);
+      await invalidateEnterpriseOrderCaches(enterpriseId).catch(
+        () => undefined,
+      );
     }
 
     // TODO: clear cart after order creation if needed

@@ -24,6 +24,8 @@ import { EnterpriseLocalUploadController } from '@modules/enterprise/upload/ente
 import { EnterpriseReviewsController } from '@modules/enterprise/reviews/enterprise-reviews.controller';
 import { ReviewsModule } from '@modules/reviews/reviews.module';
 import { EnterpriseActivationModule } from '@modules/enterprise/activation/enterprise-activation.module';
+import { EnterpriseReturnsController } from '@modules/enterprise/returns/enterprise-returns.controller';
+import { EnterpriseReturnsService } from '@modules/enterprise/returns/enterprise-returns.service';
 
 @Module({
   imports: [AuthModule, VouchersModule, ReviewsModule, EnterpriseActivationModule],
@@ -38,6 +40,7 @@ import { EnterpriseActivationModule } from '@modules/enterprise/activation/enter
     EnterpriseFoodImageController,
     EnterpriseProfileController,
     EnterpriseOrdersController,
+    EnterpriseReturnsController,
     EnterpriseVoucherController,
     EnterpriseLocalUploadController,
     EnterpriseReviewsController,
@@ -50,6 +53,7 @@ import { EnterpriseActivationModule } from '@modules/enterprise/activation/enter
     EnterpriseMenuService,
     EnterpriseProfileService,
     EnterpriseOrdersService,
+    EnterpriseReturnsService,
     EnterpriseVoucherService,
   ],
 })

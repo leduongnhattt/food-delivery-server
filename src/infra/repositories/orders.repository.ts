@@ -28,6 +28,7 @@ export type OrderForCustomerList = Prisma.OrderGetPayload<{
     };
     customer: { select: { FullName: true } };
     payments: true;
+    returnRequest: { select: { Status: true } };
   };
 }>;
 
@@ -125,6 +126,7 @@ export class OrdersRepository {
             },
           },
           payments: { orderBy: { PaymentDate: 'desc' }, take: 1 },
+          returnRequest: { select: { Status: true } },
         },
         orderBy: { OrderDate: 'desc' },
         skip,
@@ -150,6 +152,7 @@ export class OrdersRepository {
           },
         },
         payments: { orderBy: { PaymentDate: 'desc' }, take: 1 },
+        returnRequest: { select: { Status: true } },
       },
     });
   }
