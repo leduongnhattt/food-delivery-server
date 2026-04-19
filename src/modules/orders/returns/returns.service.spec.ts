@@ -8,6 +8,7 @@ describe('ReturnsService', () => {
   const prismaMock = {
     order: {
       findUnique: jest.fn<Promise<any>, [any]>(),
+      update: jest.fn<Promise<any>, [any]>(),
     },
     returnRequest: {
       create: jest.fn<Promise<any>, [any]>(),
@@ -168,6 +169,7 @@ describe('ReturnsService', () => {
       CreatedAt: new Date('2026-01-01T00:00:00.000Z'),
     });
     prismaMock.returnRequestItem.createMany.mockResolvedValue({ count: 1 });
+    prismaMock.order.update.mockResolvedValue({});
 
     const res = await svc.createReturnRequestForCustomer('a1', 'o1', {
       items: [{ orderDetailId: 'od1', quantity: 2 }],
