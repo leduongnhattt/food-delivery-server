@@ -90,6 +90,7 @@ model Customer {
   carts   Cart[]
   userHealth UserHealth[]
   orders  Order[]
+  returnRequests ReturnRequest[]
 
   @@index([PreferredPaymentMethod])
   @@index([Latitude, Longitude])
@@ -172,6 +173,7 @@ model Enterprise {
   deductionRules               DeductionRule[]
   payoutDestinations           EnterprisePayoutDestination[]
   payoutSettings               EnterprisePayoutSettings?
+  returnRequests               ReturnRequest[]
 
   @@index([AccountID])
   @@index([EnterpriseName])
@@ -235,6 +237,7 @@ model Food {
   menuFoods    MenuFood[]
   orderDetails OrderDetail[]
   cartItems    CartItem[]
+  returnRequestItems ReturnRequestItem[]
 
   @@index([FoodCategoryID])
   @@index([EnterpriseID])
@@ -321,6 +324,7 @@ model Order {
   orderDetails  OrderDetail[]
   payments      Payment[]
   settlementItems SettlementItem[]
+  returnRequest ReturnRequest?
 
   @@index([VoucherID])
   @@index([Status])
@@ -345,11 +349,78 @@ model OrderDetail {
 
   order Order @relation(fields: [OrderID], references: [OrderID], onDelete: Cascade)
   food  Food  @relation(fields: [FoodID], references: [FoodID], onDelete: Cascade)
+  returnRequestItems ReturnRequestItem[]
 
   @@index([OrderID])
   @@index([FoodID])
   @@unique([OrderID, FoodID])
   @@map("ORDER_DETAIL")
+}
+
+enum ReturnRequestStatus {
+  PendingReview
+  Approved
+  Rejected
+  CancelledByCustomer
+  Completed
+}
+
+enum ReturnReasonCode {
+  missing_items
+  wrong_item
+  quality_issue
+  damaged_spill
+  late_delivery
+  other
+}
+
+enum ReturnRequestedSolution {
+  RefundOnly
+  Replace
+  StoreCredit
+}
+
+model ReturnRequest {
+  ReturnRequestID   String               @id @default(uuid()) @db.VarChar(36)
+  OrderID           String               @unique @db.VarChar(36)
+  CustomerID        String               @db.VarChar(36)
+  EnterpriseID      String               @db.VarChar(36)
+  Status            ReturnRequestStatus  @default(PendingReview)
+  ReasonCode        ReturnReasonCode
+  ReasonText        String?              @db.Text
+  RequestedSolution ReturnRequestedSolution @default(RefundOnly)
+  RequestedAmount   Decimal              @db.Decimal(18, 2)
+  Metadata          Json?
+  CreatedAt         DateTime             @default(now())
+  UpdatedAt         DateTime?            @updatedAt
+
+  order       Order       @relation(fields: [OrderID], references: [OrderID], onDelete: Cascade)
+  customer    Customer    @relation(fields: [CustomerID], references: [CustomerID], onDelete: Restrict)
+  enterprise  Enterprise  @relation(fields: [EnterpriseID], references: [EnterpriseID], onDelete: Restrict)
+  items       ReturnRequestItem[]
+
+  @@index([EnterpriseID, Status, CreatedAt], map: "RR_ent_status_created_idx")
+  @@index([CustomerID, CreatedAt], map: "RR_cust_created_idx")
+  @@map("RETURN_REQUEST")
+}
+
+model ReturnRequestItem {
+  ReturnRequestItemID String   @id @default(uuid()) @db.VarChar(36)
+  ReturnRequestID     String   @db.VarChar(36)
+  OrderDetailID       String   @db.VarChar(36)
+  FoodID              String   @db.VarChar(36)
+  Quantity            Int
+  LineAmount          Decimal  @db.Decimal(18, 2)
+  CreatedAt           DateTime @default(now())
+  UpdatedAt           DateTime? @updatedAt
+
+  returnRequest ReturnRequest @relation(fields: [ReturnRequestID], references: [ReturnRequestID], onDelete: Cascade)
+  orderDetail   OrderDetail   @relation(fields: [OrderDetailID], references: [OrderDetailID], onDelete: Restrict)
+  food          Food          @relation(fields: [FoodID], references: [FoodID], onDelete: Restrict)
+
+  @@index([ReturnRequestID], map: "RRI_req_idx")
+  @@index([OrderDetailID], map: "RRI_order_detail_idx")
+  @@map("RETURN_REQUEST_ITEM")
 }
 
 model Cart {

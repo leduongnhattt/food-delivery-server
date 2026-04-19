@@ -6,10 +6,11 @@ import { OrdersRepository } from '@infra/repositories/orders.repository';
 import { CustomersModule } from '@modules/customers/customers.module';
 import { AuthModule } from '@modules/auth/auth.module';
 import { ShippingModule } from '@modules/shipping/shipping.module';
+import { ReturnsService } from '@modules/orders/returns/returns.service';
 
 @Module({
   imports: [PrismaModule, CustomersModule, AuthModule, ShippingModule],
-  providers: [OrdersService, OrdersRepository],
+  providers: [OrdersService, OrdersRepository, ReturnsService],
   controllers: [OrdersController],
 })
 export class OrdersModule {}

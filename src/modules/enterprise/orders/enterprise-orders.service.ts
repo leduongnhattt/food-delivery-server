@@ -10,6 +10,33 @@ import { OrderStatus, PaymentStatus, Prisma } from '@prisma/client';
 import { ORDER_STATUS } from '@common/constants/order-payment-status.constants';
 import { isEnterpriseTransitionAllowed } from '@modules/enterprise/orders/enterprise-order-status.transitions';
 
+function isJsonObject(v: unknown): v is Prisma.JsonObject {
+  return !!v && typeof v === 'object' && !Array.isArray(v);
+}
+
+type EnterpriseStatusHistoryEntry = {
+  status: string;
+  at: string;
+  actor?: string;
+};
+
+function parseEnterpriseStatusHistory(
+  raw: unknown,
+): EnterpriseStatusHistoryEntry[] {
+  if (!Array.isArray(raw)) return [];
+  const out: EnterpriseStatusHistoryEntry[] = [];
+  for (const x of raw) {
+    if (!x || typeof x !== 'object' || Array.isArray(x)) continue;
+    const o = x as Record<string, unknown>;
+    const status = typeof o.status === 'string' ? o.status : '';
+    const at = typeof o.at === 'string' ? o.at : '';
+    if (!status || !at) continue;
+    const actor = typeof o.actor === 'string' ? o.actor : undefined;
+    out.push(actor ? { status, at, actor } : { status, at });
+  }
+  return out;
+}
+
 const ordersInclude = {
   customer: {
     select: {
@@ -17,6 +44,12 @@ const ordersInclude = {
       PhoneNumber: true,
       Address: true,
       account: { select: { Username: true } },
+    },
+  },
+  returnRequest: {
+    select: {
+      ReturnRequestID: true,
+      Status: true,
     },
   },
   orderDetails: {
@@ -76,7 +109,8 @@ interface OrdersCachePayload {
 
 const CACHE_KEYS = {
   orders: (enterpriseId: string) => `enterprise:${enterpriseId}:orders:v3`,
-  recent: (enterpriseId: string) => `enterprise:${enterpriseId}:recent_orders:v3`,
+  recent: (enterpriseId: string) =>
+    `enterprise:${enterpriseId}:recent_orders:v3`,
   stats: (enterpriseId: string) => `enterprise:${enterpriseId}:stats`,
   revenue: (enterpriseId: string) => `enterprise:${enterpriseId}:revenue`,
 } as const;
@@ -99,7 +133,9 @@ const ENTERPRISE_SETTABLE_STATUSES: OrderStatus[] = [
 export class EnterpriseOrdersService {
   constructor(private readonly prisma: PrismaService) {}
 
-  private parseDeliveryMethod(body: { deliveryMethod?: unknown }): 'SelfDelivery' | 'ThirdParty' {
+  private parseDeliveryMethod(body: {
+    deliveryMethod?: unknown;
+  }): 'SelfDelivery' | 'ThirdParty' {
     const raw = body?.deliveryMethod;
     if (typeof raw !== 'string') {
       throw new BadRequestException('deliveryMethod is required');
@@ -120,7 +156,9 @@ export class EnterpriseOrdersService {
     return enterprise.EnterpriseID;
   }
 
-  private async invalidateEnterpriseCaches(enterpriseId: string): Promise<void> {
+  private async invalidateEnterpriseCaches(
+    enterpriseId: string,
+  ): Promise<void> {
     await Promise.all([
       deleteKey(CACHE_KEYS.orders(enterpriseId)),
       deleteKey(CACHE_KEYS.recent(enterpriseId)),
@@ -132,6 +170,19 @@ export class EnterpriseOrdersService {
   private formatOrderRows(rows: OrderRow[]): EnterpriseCachedOrder[] {
     return rows.map((order) => {
       const latest = order.payments[0];
+      const baseMeta =
+        order.Metadata && isJsonObject(order.Metadata) ? order.Metadata : {};
+      const metaReturnIdRaw = baseMeta['returnRequestId'];
+      const hasMetaReturnId =
+        typeof metaReturnIdRaw === 'string' &&
+        metaReturnIdRaw.trim().length > 0;
+      const rrId = hasMetaReturnId
+        ? metaReturnIdRaw.trim()
+        : (order.returnRequest?.ReturnRequestID ?? null);
+      const mergedMeta =
+        rrId && !hasMetaReturnId
+          ? ({ ...baseMeta, returnRequestId: rrId } as Prisma.JsonObject)
+          : baseMeta;
       return {
         id: order.OrderID,
         customerName:
@@ -152,8 +203,11 @@ export class EnterpriseOrdersService {
           subTotal: Number(d.SubTotal),
           imageUrl: d.food.ImageURL ?? null,
         })),
-        estimatedDeliveryTime: order.EstimatedDeliveryTime?.toISOString() ?? null,
-        metadata: order.Metadata ?? null,
+        estimatedDeliveryTime:
+          order.EstimatedDeliveryTime?.toISOString() ?? null,
+        metadata: Object.keys(mergedMeta).length
+          ? mergedMeta
+          : (order.Metadata ?? null),
         paymentId: latest?.PaymentID ?? null,
         paymentStatus: latest?.PaymentStatus ?? null,
         paymentMethod: latest?.PaymentMethod ?? null,
@@ -193,7 +247,11 @@ export class EnterpriseOrdersService {
       totalCount: orders.length,
       lastUpdated: new Date().toISOString(),
     };
-    await setKeyJson(CACHE_KEYS.orders(enterpriseId), payload, TTL_SECONDS.orders);
+    await setKeyJson(
+      CACHE_KEYS.orders(enterpriseId),
+      payload,
+      TTL_SECONDS.orders,
+    );
     await setKeyJson(
       CACHE_KEYS.recent(enterpriseId),
       orders.slice(0, 10),
@@ -231,7 +289,11 @@ export class EnterpriseOrdersService {
     });
 
     const orders = this.formatOrderRows(rows);
-    await setKeyJson(CACHE_KEYS.recent(enterpriseId), orders, TTL_SECONDS.recent);
+    await setKeyJson(
+      CACHE_KEYS.recent(enterpriseId),
+      orders,
+      TTL_SECONDS.recent,
+    );
     return { success: true, orders, fromCache: false };
   }
 
@@ -291,10 +353,13 @@ export class EnterpriseOrdersService {
         orderDate: order.OrderDate.toISOString(),
         deliveryAddress: order.DeliveryAddress,
         deliveryNote: order.DeliveryNote ?? '',
-        estimatedDeliveryTime: order.EstimatedDeliveryTime?.toISOString() ?? null,
+        estimatedDeliveryTime:
+          order.EstimatedDeliveryTime?.toISOString() ?? null,
         deliveredAt: order.DeliveredAt?.toISOString() ?? null,
         commissionAmount:
-          order.CommissionAmount != null ? Number(order.CommissionAmount) : null,
+          order.CommissionAmount != null
+            ? Number(order.CommissionAmount)
+            : null,
         metadata: order.Metadata,
         customer: {
           fullName: order.customer?.FullName ?? null,
@@ -338,7 +403,11 @@ export class EnterpriseOrdersService {
   /**
    * Enterprise updates order status (kitchen ops + cancel before shipping).
    */
-  async updateStatus(accountId: string, orderId: string, body: { status?: unknown }) {
+  async updateStatus(
+    accountId: string,
+    orderId: string,
+    body: { status?: unknown },
+  ) {
     if (!orderId?.trim()) {
       throw new BadRequestException('Order id is required');
     }
@@ -362,6 +431,7 @@ export class EnterpriseOrdersService {
         select: {
           OrderID: true,
           Status: true,
+          Metadata: true,
         },
       });
 
@@ -370,7 +440,11 @@ export class EnterpriseOrdersService {
       }
 
       if (order.Status === target) {
-        return { orderId: order.OrderID, status: target, unchanged: true as const };
+        return {
+          orderId: order.OrderID,
+          status: target,
+          unchanged: true as const,
+        };
       }
 
       if (!isEnterpriseTransitionAllowed(order.Status, target)) {
@@ -379,7 +453,39 @@ export class EnterpriseOrdersService {
         );
       }
 
-      const data: Prisma.OrderUpdateInput = { Status: target };
+      const baseMeta: Prisma.JsonObject = isJsonObject(order.Metadata)
+        ? order.Metadata
+        : {};
+
+      const existingHistory = parseEnterpriseStatusHistory(
+        baseMeta['statusHistory'],
+      );
+      const nextHistory: EnterpriseStatusHistoryEntry[] = [
+        ...existingHistory,
+        {
+          status: String(target),
+          at: new Date().toISOString(),
+          actor: 'enterprise',
+        },
+      ];
+
+      const nextMetaObj: Prisma.JsonObject = {
+        ...baseMeta,
+        statusHistory: nextHistory as unknown as Prisma.JsonValue,
+      };
+      // Cancellation timestamp is useful for customer timeline.
+      if (
+        target === ORDER_STATUS.Cancelled &&
+        typeof nextMetaObj['cancelledAt'] !== 'string'
+      ) {
+        nextMetaObj['cancelledAt'] = new Date().toISOString();
+      }
+      const nextMeta: Prisma.InputJsonValue = nextMetaObj;
+
+      const data: Prisma.OrderUpdateInput = {
+        Status: target,
+        Metadata: nextMeta,
+      };
       if (target === ORDER_STATUS.Delivered) {
         data.DeliveredAt = new Date();
       }
@@ -398,7 +504,11 @@ export class EnterpriseOrdersService {
         data,
       });
 
-      return { orderId: order.OrderID, status: target, unchanged: false as const };
+      return {
+        orderId: order.OrderID,
+        status: target,
+        unchanged: false as const,
+      };
     });
 
     await this.invalidateEnterpriseCaches(enterpriseId);
@@ -438,19 +548,24 @@ export class EnterpriseOrdersService {
         throw new NotFoundException('Order not found or access denied');
       }
 
-      const allowedStatuses: OrderStatus[] = [OrderStatus.Confirmed, OrderStatus.Preparing];
+      const allowedStatuses: OrderStatus[] = [
+        OrderStatus.Confirmed,
+        OrderStatus.Preparing,
+      ];
       if (!allowedStatuses.includes(order.Status)) {
         throw new ConflictException(
           `Cannot set delivery method when status is ${order.Status}. Allowed: Confirmed, Preparing`,
         );
       }
 
-      const base =
-        order.Metadata && typeof order.Metadata === 'object' && !Array.isArray(order.Metadata)
-          ? (order.Metadata as Record<string, unknown>)
-          : {};
+      const base: Prisma.JsonObject = isJsonObject(order.Metadata)
+        ? order.Metadata
+        : {};
 
-      const next = { ...base, deliveryMethod };
+      const next: Prisma.InputJsonValue = {
+        ...base,
+        deliveryMethod,
+      } as Prisma.InputJsonValue;
 
       await tx.order.update({
         where: { OrderID: orderId },
