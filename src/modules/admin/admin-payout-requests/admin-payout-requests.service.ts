@@ -22,7 +22,8 @@ function parseTargetStatus(v: unknown): EnterprisePayoutRequestStatus {
     EnterprisePayoutRequestStatus.Paid,
     EnterprisePayoutRequestStatus.Failed,
   ];
-  if (!allowed.includes(raw as any)) {
+  const allowedSet = new Set<string>(allowed);
+  if (!allowedSet.has(raw)) {
     throw new BadRequestException(`Invalid status: ${raw}`);
   }
   return raw as EnterprisePayoutRequestStatus;

@@ -1,17 +1,29 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { EnterpriseIncomeService } from '@modules/enterprise/income/enterprise-income.service';
+import type { PrismaService } from '@infra/prisma/prisma.service';
 
-function createPrismaMock(overrides?: Partial<any>) {
-  return {
+type PrismaLike = {
+  enterprise: { findFirst: jest.Mock };
+  settlement: { findFirst: jest.Mock };
+  enterprisePayoutSettings: { findUnique: jest.Mock };
+  enterprisePayoutDestination: { findMany: jest.Mock; findFirst: jest.Mock };
+  enterprisePayoutRequest: { findFirst: jest.Mock; create: jest.Mock };
+  enterpriseLedgerEntry: { create: jest.Mock };
+  $transaction: <T>(fn: (tx: PrismaLike) => Promise<T>) => Promise<T>;
+};
+
+function createPrismaMock(overrides: Partial<PrismaLike> = {}): PrismaLike {
+  const base: PrismaLike = {
     enterprise: { findFirst: jest.fn() },
     settlement: { findFirst: jest.fn() },
     enterprisePayoutSettings: { findUnique: jest.fn() },
     enterprisePayoutDestination: { findMany: jest.fn(), findFirst: jest.fn() },
     enterprisePayoutRequest: { findFirst: jest.fn(), create: jest.fn() },
     enterpriseLedgerEntry: { create: jest.fn() },
-    $transaction: jest.fn(async (fn: any) => fn(createPrismaMock(overrides))),
-    ...overrides,
+    $transaction: <T>(fn: (tx: PrismaLike) => Promise<T>) =>
+      fn(createPrismaMock(overrides)),
   };
+  return { ...base, ...overrides };
 }
 
 describe('EnterpriseIncomeService', () => {
@@ -23,7 +35,7 @@ describe('EnterpriseIncomeService', () => {
       enterprisePayoutDestination: { findMany: jest.fn().mockResolvedValue([]) },
       enterprisePayoutRequest: { findFirst: jest.fn().mockResolvedValue(null) },
     });
-    const svc = new EnterpriseIncomeService(prisma as any);
+    const svc = new EnterpriseIncomeService(prisma as unknown as PrismaService);
     const res = await svc.getSummary('acc1');
     expect(res.success).toBe(true);
     expect(res.balance).toBe(0);
@@ -60,7 +72,7 @@ describe('EnterpriseIncomeService', () => {
       },
       enterprisePayoutRequest: { findFirst: jest.fn().mockResolvedValue({ PayoutRequestID: 'pr1' }) },
     });
-    const svc = new EnterpriseIncomeService(prisma as any);
+    const svc = new EnterpriseIncomeService(prisma as unknown as PrismaService);
     const res = await svc.getSummary('acc1');
     expect(res.balance).toBe(0);
     expect(res.canWithdraw).toBe(false);
@@ -77,8 +89,8 @@ describe('EnterpriseIncomeService', () => {
         }),
       },
     });
-    const svc = new EnterpriseIncomeService(prisma as any);
-    await expect(svc.createWithdrawRequest('acc1', {} as any)).rejects.toBeInstanceOf(
+    const svc = new EnterpriseIncomeService(prisma as unknown as PrismaService);
+    await expect(svc.createWithdrawRequest('acc1', {})).rejects.toBeInstanceOf(
       ConflictException,
     );
   });
@@ -88,8 +100,8 @@ describe('EnterpriseIncomeService', () => {
       enterprise: { findFirst: jest.fn().mockResolvedValue({ EnterpriseID: 'e1' }) },
       settlement: { findFirst: jest.fn().mockResolvedValue(null) },
     });
-    const svc = new EnterpriseIncomeService(prisma as any);
-    await expect(svc.createWithdrawRequest('acc1', {} as any)).rejects.toBeInstanceOf(
+    const svc = new EnterpriseIncomeService(prisma as unknown as PrismaService);
+    await expect(svc.createWithdrawRequest('acc1', {})).rejects.toBeInstanceOf(
       NotFoundException,
     );
   });
@@ -116,15 +128,15 @@ describe('EnterpriseIncomeService', () => {
       },
     });
     // Ensure $transaction uses tx with the same behavior
-    prisma.$transaction = jest.fn(async (fn: any) =>
+    prisma.$transaction = <T>(fn: (tx: PrismaLike) => Promise<T>) =>
       fn({
+        ...prisma,
         enterprisePayoutRequest: prisma.enterprisePayoutRequest,
         enterpriseLedgerEntry: prisma.enterpriseLedgerEntry,
-      }),
-    );
-    const svc = new EnterpriseIncomeService(prisma as any);
+      });
+    const svc = new EnterpriseIncomeService(prisma as unknown as PrismaService);
     await expect(
-      svc.createWithdrawRequest('acc1', { payoutDestinationId: 'd1' } as any),
+      svc.createWithdrawRequest('acc1', { payoutDestinationId: 'd1' }),
     ).rejects.toBeInstanceOf(ConflictException);
   });
 });

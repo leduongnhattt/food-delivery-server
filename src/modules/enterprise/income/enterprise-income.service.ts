@@ -176,8 +176,11 @@ export class EnterpriseIncomeService {
         .map((x) => x.trim())
         .filter(Boolean),
     );
-    const allowedTypes = new Set(Object.values(EnterpriseLedgerEntryType));
-    const types = [...typeSet].filter((t) => allowedTypes.has(t as any)) as EnterpriseLedgerEntryType[];
+    const allowedTypes = Object.values(EnterpriseLedgerEntryType) as EnterpriseLedgerEntryType[];
+    const allowedTypesSet = new Set<string>(allowedTypes);
+    const types = [...typeSet].filter((t): t is EnterpriseLedgerEntryType =>
+      allowedTypesSet.has(t),
+    );
 
     const q = asTrimmedString(params.searchOrderId)?.toLowerCase() ?? null;
     const limit = Math.min(100, asPositiveInt(params.limit) ?? 50);
@@ -243,8 +246,6 @@ export class EnterpriseIncomeService {
     const reason = asTrimmedString(body.reason);
 
     const now = new Date();
-    const periodStart = startOfMonth(now);
-    const periodEnd = endOfMonth(now);
     const currency = currencyForEnterprise();
 
     const settlement =
