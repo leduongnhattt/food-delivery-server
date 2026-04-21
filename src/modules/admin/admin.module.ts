@@ -8,6 +8,7 @@ import { AdminReviewsModule } from './admin-reviews/admin-reviews.module';
 import { AdminSupportModule } from './admin-support/admin-support.module';
 import { AdminVouchersModule } from './admin-vouchers/admin-vouchers.module';
 import { AdminOrdersModule } from './admin-orders/admin-orders.module';
+import { AdminPayoutRequestsModule } from '@modules/admin/admin-payout-requests/admin-payout-requests.module';
 
 /**
  * Aggregates admin-only HTTP features. Each subdomain lives in its own Nest module
@@ -24,6 +25,7 @@ import { AdminOrdersModule } from './admin-orders/admin-orders.module';
     AdminReviewsModule,
     AdminSupportModule,
     AdminOrdersModule,
+    AdminPayoutRequestsModule,
   ],
 })
 export class AdminModule {}

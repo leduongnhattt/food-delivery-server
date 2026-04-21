@@ -19,8 +19,8 @@ function asPlainObject(value: unknown): Record<string, unknown> {
 
 function enterpriseCacheKeys(enterpriseId: string) {
   return {
-    orders: `enterprise:${enterpriseId}:orders:v3`,
-    recent: `enterprise:${enterpriseId}:recent_orders:v3`,
+    orders: `enterprise:${enterpriseId}:orders:v4`,
+    recent: `enterprise:${enterpriseId}:recent_orders:v4`,
     stats: `enterprise:${enterpriseId}:stats`,
     revenue: `enterprise:${enterpriseId}:revenue`,
   } as const;

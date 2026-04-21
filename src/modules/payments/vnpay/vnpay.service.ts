@@ -8,6 +8,7 @@ import { PAYMENT_PROVIDER } from '@common/constants/payment-provider.constants';
 import { PAYMENT_METHOD } from '@common/constants/payment-method.constants';
 import { formatVnpCreateDateCompact, sanitizeVnpOrderDescription } from '@modules/payments/vnpay/utils/vnpay-format.util';
 import { EtaService } from '@modules/shipping/eta.service';
+import { CommissionSettlementService } from '@modules/payments/commission-settlement/commission-settlement.service';
 import {
   loadAccountCurrencyCode,
   loadEnterpriseDisplayNameFromFirstCartItem,
@@ -53,6 +54,7 @@ export class VnPayService {
     private readonly prisma: PrismaService,
     private readonly usdVndExchangeRate: UsdVndExchangeRateService,
     private readonly etaService: EtaService,
+    private readonly commissionSettlement: CommissionSettlementService,
   ) { }
 
   private vnpAttemptKey(paymentId: string) {
@@ -360,6 +362,7 @@ export class VnPayService {
     }
 
     const orderId = await this.createOrderAfterVnpSuccess(attempt, query);
+    await this.commissionSettlement.applyCommissionAndSettlement(orderId);
     await setKeyJson(
       attemptKey,
       { ...attempt, status: 'paid', orderId, ipn: query } satisfies VnpPayAttempt,

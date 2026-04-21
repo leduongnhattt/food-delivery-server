@@ -48,6 +48,7 @@ model Account {
   passwordResetTokens PasswordResetToken[]
   enterpriseInvitations EnterpriseInvitation[]
   auditLogs   AuditLog[]
+  enterprisePayoutRequestsRequested EnterprisePayoutRequest[] @relation("EnterprisePayoutRequestRequestedBy")
 
   @@index([RoleID])
   @@index([Locale])
@@ -174,6 +175,8 @@ model Enterprise {
   payoutDestinations           EnterprisePayoutDestination[]
   payoutSettings               EnterprisePayoutSettings?
   returnRequests               ReturnRequest[]
+  payoutRequests               EnterprisePayoutRequest[]
+  ledgerEntries                EnterpriseLedgerEntry[]
 
   @@index([AccountID])
   @@index([EnterpriseName])
@@ -519,6 +522,7 @@ model Settlement {
   enterprise  Enterprise @relation(fields: [EnterpriseID], references: [EnterpriseID], onDelete: Restrict)
   items       SettlementItem[]
   deductions  SettlementDeduction[]
+  payoutRequests EnterprisePayoutRequest[]
 
   @@index([EnterpriseID])
   @@index([Status])
@@ -872,6 +876,42 @@ enum PayoutFrequency {
   Yearly
 }
 
+enum EnterprisePayoutRequestStatus {
+  Pending
+  Approved
+  Rejected
+  Processing
+  Paid
+  Failed
+  Cancelled
+  Expired
+}
+
+enum EnterpriseLedgerEntryType {
+  OrderIncome
+  Withdrawal
+  Refund
+  Adjustment
+  Commission
+  Deduction
+}
+
+enum EnterpriseLedgerEntryMoneyFlow {
+  In
+  Out
+}
+
+enum EnterpriseLedgerEntryStatus {
+  Pending
+  Approved
+  Rejected
+  Processing
+  Paid
+  Failed
+  Cancelled
+  Expired
+}
+
 model EnterprisePayoutDestination {
   PayoutDestinationID String                @id @default(uuid()) @db.VarChar(36)
   EnterpriseID        String                @db.VarChar(36)
@@ -898,12 +938,72 @@ model EnterprisePayoutDestination {
 
   enterprise           Enterprise               @relation(fields: [EnterpriseID], references: [EnterpriseID], onDelete: Cascade)
   preferredForSettings EnterprisePayoutSettings? @relation("EnterprisePreferredPayout")
+  payoutRequests       EnterprisePayoutRequest[]
 
   @@index([EnterpriseID])
   @@index([EnterpriseID, IsActive])
   @@index([Kind])
   @@index([ProviderCode])
   @@map("ENTERPRISE_PAYOUT_DESTINATION")
+}
+
+model EnterprisePayoutRequest {
+  PayoutRequestID     String                      @id @default(uuid()) @db.VarChar(36)
+  EnterpriseID        String                      @db.VarChar(36)
+  RequestedByAccountID String                     @db.VarChar(36)
+  PayoutDestinationID String                      @db.VarChar(36)
+  SettlementID        String?                     @db.VarChar(36)
+  Amount              Decimal                     @db.Decimal(18, 2)
+  Currency            String                      @db.VarChar(3)
+  Status              EnterprisePayoutRequestStatus @default(Pending)
+  Reason              String?                     @db.VarChar(255)
+  AdminNote           String?                     @db.Text
+  FailureCode         String?                     @db.VarChar(80)
+  FailureMessage      String?                     @db.Text
+  ExpiresAt           DateTime
+  ApprovedAt          DateTime?
+  PaidAt              DateTime?
+  CreatedAt           DateTime                    @default(now())
+  UpdatedAt           DateTime?                   @updatedAt
+
+  enterprise        Enterprise                  @relation(fields: [EnterpriseID], references: [EnterpriseID], onDelete: Restrict)
+  payoutDestination EnterprisePayoutDestination @relation(fields: [PayoutDestinationID], references: [PayoutDestinationID], onDelete: Restrict)
+  settlement        Settlement?                 @relation(fields: [SettlementID], references: [SettlementID], onDelete: SetNull)
+  requestedBy       Account                     @relation("EnterprisePayoutRequestRequestedBy", fields: [RequestedByAccountID], references: [AccountID], onDelete: Restrict)
+  ledgerEntries     EnterpriseLedgerEntry[]
+
+  @@index([EnterpriseID, CreatedAt])
+  @@index([EnterpriseID, Status])
+  @@index([SettlementID])
+  @@index([PayoutDestinationID])
+  @@index([ExpiresAt])
+  @@map("ENTERPRISE_PAYOUT_REQUEST")
+}
+
+model EnterpriseLedgerEntry {
+  LedgerEntryID   String                     @id @default(uuid()) @db.VarChar(36)
+  EnterpriseID    String                     @db.VarChar(36)
+  Type            EnterpriseLedgerEntryType
+  MoneyFlow       EnterpriseLedgerEntryMoneyFlow
+  Amount          Decimal                    @db.Decimal(18, 2)
+  Currency        String                     @db.VarChar(3)
+  Status          EnterpriseLedgerEntryStatus
+  Description     String?                    @db.VarChar(255)
+  ReferenceType   String?                    @db.VarChar(50)
+  ReferenceID     String?                    @db.VarChar(36)
+  PayoutRequestID String?                    @db.VarChar(36)
+  Metadata        Json?
+  CreatedAt       DateTime                   @default(now())
+
+  enterprise     Enterprise              @relation(fields: [EnterpriseID], references: [EnterpriseID], onDelete: Cascade)
+  payoutRequest  EnterprisePayoutRequest? @relation(fields: [PayoutRequestID], references: [PayoutRequestID], onDelete: SetNull)
+
+  @@index([EnterpriseID, CreatedAt])
+  @@index([EnterpriseID, Type])
+  @@index([EnterpriseID, MoneyFlow])
+  @@index([ReferenceType, ReferenceID])
+  @@index([PayoutRequestID])
+  @@map("ENTERPRISE_LEDGER_ENTRY")
 }
 
 model EnterprisePayoutSettings {

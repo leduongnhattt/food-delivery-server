@@ -54,8 +54,10 @@ const ordersInclude = {
   },
   orderDetails: {
     select: {
+      FoodID: true,
       Quantity: true,
       SubTotal: true,
+      Metadata: true,
       food: { select: { DishName: true, ImageURL: true } },
     },
   },
@@ -88,10 +90,13 @@ export interface EnterpriseCachedOrder {
   metadata?: unknown;
   orderDetails: Array<{
     dishName: string;
+    foodId: string;
     quantity: number;
     subTotal: number;
     /** Product image for list row thumbnail (optional). */
     imageUrl: string | null;
+    sku?: string | null;
+    parentSku?: string | null;
   }>;
   /** SLA-style ship-by time for list UI (optional). */
   estimatedDeliveryTime: string | null;
@@ -101,6 +106,102 @@ export interface EnterpriseCachedOrder {
   paymentMethod: string | null;
 }
 
+type EnterpriseOrderSearchField =
+  | 'product'
+  | 'buyer_name'
+  | 'order_id'
+  | 'tracking_number';
+
+function parseEnterpriseListSearchField(
+  raw: string | undefined,
+): EnterpriseOrderSearchField | null {
+  const v = (raw ?? '').trim().toLowerCase();
+  if (
+    v === 'product' ||
+    v === 'buyer_name' ||
+    v === 'order_id' ||
+    v === 'tracking_number'
+  ) {
+    return v;
+  }
+  return null;
+}
+
+function jsonMetaPickString(meta: unknown, keys: string[]): string {
+  if (!meta || typeof meta !== 'object' || Array.isArray(meta)) return '';
+  const o = meta as Record<string, unknown>;
+  for (const k of keys) {
+    const v = o[k];
+    if (typeof v === 'string' && v.trim()) return v.trim();
+  }
+  return '';
+}
+
+function orderTrackingHaystack(metadata: unknown): string {
+  return [
+    jsonMetaPickString(metadata, [
+      'trackingNumber',
+      'trackingNo',
+      'tracking_no',
+      'carrierTrackingNumber',
+      'CarrierTrackingNumber',
+      'TrackingNumber',
+    ]),
+  ].join(' ');
+}
+
+function detailMetaSku(detailMeta: unknown): {
+  sku: string | null;
+  parentSku: string | null;
+} {
+  if (!detailMeta || typeof detailMeta !== 'object' || Array.isArray(detailMeta)) {
+    return { sku: null, parentSku: null };
+  }
+  const o = detailMeta as Record<string, unknown>;
+  const pick = (keys: string[]): string | null => {
+    for (const k of keys) {
+      const v = o[k];
+      if (typeof v === 'string' && v.trim()) return v.trim();
+    }
+    return null;
+  };
+  return {
+    sku: pick(['sku', 'SKU', 'Sku']),
+    parentSku: pick(['parentSku', 'parentSKU', 'ParentSKU', 'parent_sku']),
+  };
+}
+
+function enterpriseOrderMatchesSearch(
+  order: EnterpriseCachedOrder,
+  field: EnterpriseOrderSearchField,
+  q: string,
+): boolean {
+  const t = q.trim().toLowerCase();
+  if (!t) return true;
+  switch (field) {
+    case 'buyer_name': {
+      const name = order.customerName.toLowerCase();
+      const u = (order.customerUsername ?? '').toLowerCase();
+      return name.includes(t) || u.includes(t);
+    }
+    case 'order_id':
+      return order.id.toLowerCase().includes(t);
+    case 'tracking_number': {
+      const hay = orderTrackingHaystack(order.metadata).toLowerCase();
+      return hay.includes(t);
+    }
+    case 'product':
+    default:
+      return order.orderDetails.some((d) => {
+        const dn = d.dishName.toLowerCase();
+        const fid = d.foodId.toLowerCase();
+        const sku = (d.sku ?? '').toLowerCase();
+        const ps = (d.parentSku ?? '').toLowerCase();
+        return dn.includes(t) || fid.includes(t) || sku.includes(t) || ps.includes(t);
+      });
+  }
+}
+
 interface OrdersCachePayload {
   orders: EnterpriseCachedOrder[];
   lastUpdated: string;
@@ -108,9 +209,9 @@ interface OrdersCachePayload {
 }
 
 const CACHE_KEYS = {
-  orders: (enterpriseId: string) => `enterprise:${enterpriseId}:orders:v3`,
+  orders: (enterpriseId: string) => `enterprise:${enterpriseId}:orders:v4`,
   recent: (enterpriseId: string) =>
-    `enterprise:${enterpriseId}:recent_orders:v3`,
+    `enterprise:${enterpriseId}:recent_orders:v4`,
   stats: (enterpriseId: string) => `enterprise:${enterpriseId}:stats`,
   revenue: (enterpriseId: string) => `enterprise:${enterpriseId}:revenue`,
 } as const;
@@ -197,12 +298,19 @@ export class EnterpriseOrdersService {
         deliveryAddress: order.DeliveryAddress,
         phoneNumber: order.customer?.PhoneNumber || null,
         customerAddress: order.customer?.Address || null,
-        orderDetails: order.orderDetails.map((d) => ({
-          dishName: d.food.DishName,
-          quantity: d.Quantity,
-          subTotal: Number(d.SubTotal),
-          imageUrl: d.food.ImageURL ?? null,
-        })),
+        orderDetails: order.orderDetails.map((d) => {
+          const { sku, parentSku } = detailMetaSku(d.Metadata);
+          const line: EnterpriseCachedOrder['orderDetails'][number] = {
+            dishName: d.food.DishName,
+            foodId: d.FoodID,
+            quantity: d.Quantity,
+            subTotal: Number(d.SubTotal),
+            imageUrl: d.food.ImageURL ?? null,
+          };
+          if (sku) line.sku = sku;
+          if (parentSku) line.parentSku = parentSku;
+          return line;
+        }),
         estimatedDeliveryTime:
           order.EstimatedDeliveryTime?.toISOString() ?? null,
         metadata: Object.keys(mergedMeta).length
@@ -215,17 +323,26 @@ export class EnterpriseOrdersService {
     });
   }
 
-  async list(accountId: string, opts?: { force?: boolean }) {
+  async list(
+    accountId: string,
+    opts?: { force?: boolean; searchField?: string; search?: string },
+  ) {
     const enterpriseId = await this.getEnterpriseIdByAccountId(accountId);
 
     const cached = opts?.force
       ? null
       : await getKeyJson<OrdersCachePayload>(CACHE_KEYS.orders(enterpriseId));
     if (cached) {
+      const field = parseEnterpriseListSearchField(opts?.searchField);
+      const q = (opts?.search ?? '').trim();
+      const orders =
+        field && q
+          ? cached.orders.filter((o) => enterpriseOrderMatchesSearch(o, field, q))
+          : cached.orders;
       return {
         success: true,
-        orders: cached.orders,
-        totalCount: cached.totalCount,
+        orders,
+        totalCount: orders.length,
         lastUpdated: cached.lastUpdated,
         fromCache: true,
       };
@@ -258,10 +375,17 @@ export class EnterpriseOrdersService {
       TTL_SECONDS.recent,
     );
 
+    const field = parseEnterpriseListSearchField(opts?.searchField);
+    const q = (opts?.search ?? '').trim();
+    const filtered =
+      field && q
+        ? orders.filter((o) => enterpriseOrderMatchesSearch(o, field, q))
+        : orders;
+
     return {
       success: true,
-      orders,
-      totalCount: orders.length,
+      orders: filtered,
+      totalCount: filtered.length,
       lastUpdated: payload.lastUpdated,
       fromCache: false,
     };

@@ -306,8 +306,8 @@ export class OrdersService {
 
     await Promise.all(
       enterpriseIds.flatMap((eid) => {
-        const orders = `enterprise:${eid}:orders:v3`;
-        const recent = `enterprise:${eid}:recent_orders:v3`;
+        const orders = `enterprise:${eid}:orders:v4`;
+        const recent = `enterprise:${eid}:recent_orders:v4`;
         const stats = `enterprise:${eid}:stats`;
         const revenue = `enterprise:${eid}:revenue`;
         return [
@@ -367,47 +367,6 @@ export class OrdersService {
       trackingInfo: {},
       orderTime: orderTime.toISOString(),
       lastUpdated: order.EstimatedDeliveryTime?.toISOString() ?? null,
-    };
-  }
-
-  async reorderForCustomer(
-    accountId: string,
-    orderId: string,
-  ): Promise<{ success: boolean; message: string }> {
-    const customer = await this.customersService.getByAccountId(accountId);
-    if (!customer) {
-      throw new NotFoundException('Customer not found');
-    }
-
-    const order = await this.repo.findById(orderId);
-    if (!order || order.CustomerID !== customer.CustomerID) {
-      throw new NotFoundException('Order not found');
-    }
-
-    const status = String(order.Status).toLowerCase();
-    if (status === 'cancelled') {
-      throw new BadRequestException('Cannot reorder a cancelled order');
-    }
-
-    await this.repo.createReorderFromExisting({
-      OrderID: order.OrderID,
-      CustomerID: order.CustomerID,
-      VoucherID: order.VoucherID ?? null,
-      TotalAmount: order.TotalAmount,
-      DeliveryAddress: order.DeliveryAddress,
-      DeliveryNote: order.DeliveryNote ?? null,
-      orderDetails: order.orderDetails.map((od) => ({
-        OrderDetailID: od.OrderDetailID,
-        OrderID: od.OrderID,
-        FoodID: od.FoodID,
-        SubTotal: od.SubTotal,
-        Quantity: od.Quantity,
-      })),
-    });
-
-    return {
-      success: true,
-      message: 'Order has been re-created from previous order items.',
     };
   }
 

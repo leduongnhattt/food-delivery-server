@@ -274,19 +274,4 @@ export class OrdersController {
 
     return this.ordersService.trackForCustomer(decoded.accountId, id);
   }
-
-  @Post(':id/reorder')
-  async reorder(@Req() req: Request, @Param('id') id: string) {
-    const authHeader = req.headers['authorization'];
-    const token = authHeader?.replace(/^Bearer\s+/i, '');
-    if (!token) {
-      throw new UnauthorizedException('Unauthorized');
-    }
-    const decoded = this.authService.verifyAccessToken(token) as JwtPayload;
-    if (!decoded?.accountId) {
-      throw new UnauthorizedException('Invalid or expired token');
-    }
-
-    return this.ordersService.reorderForCustomer(decoded.accountId, id);
-  }
 }
