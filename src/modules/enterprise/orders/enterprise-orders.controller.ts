@@ -32,9 +32,15 @@ export class EnterpriseOrdersController {
   async list(
     @CurrentAccount() account: JwtPayload | null,
     @Query('force') force?: string,
+    @Query('searchField') searchField?: string,
+    @Query('search') search?: string,
   ) {
     this.assertEnterprise(account);
-    return this.service.list(account.accountId, { force: force === '1' || force === 'true' });
+    return this.service.list(account.accountId, {
+      force: force === '1' || force === 'true',
+      searchField,
+      search,
+    });
   }
 
   @Get('recent')

@@ -1,8 +1,16 @@
 import { Injectable } from '@nestjs/common';
-import { OrderStatus, PaymentMethod, PaymentStatus, Prisma } from '@prisma/client';
+import {
+  OrderStatus,
+  PaymentMethod,
+  PaymentStatus,
+  Prisma,
+} from '@prisma/client';
 import { PrismaService } from '@infra/prisma/prisma.service';
 import type { OrderCartItemDto } from '@modules/orders/orders.service';
-import { ORDER_STATUS, PAYMENT_STATUS } from '@common/constants/order-payment-status.constants';
+import {
+  ORDER_STATUS,
+  PAYMENT_STATUS,
+} from '@common/constants/order-payment-status.constants';
 import { PAYMENT_METHOD } from '@common/constants/payment-method.constants';
 
 export type OrderForCustomerList = Prisma.OrderGetPayload<{
@@ -56,7 +64,10 @@ export class OrdersRepository {
     limit?: number,
   ): { page: number; limit: number; skip: number } {
     const safeLimit = Math.min(
-      Math.max(limit ?? OrdersRepositoryLimits.defaultPageSize, OrdersRepositoryLimits.minPageSize),
+      Math.max(
+        limit ?? OrdersRepositoryLimits.defaultPageSize,
+        OrdersRepositoryLimits.minPageSize,
+      ),
       OrdersRepositoryLimits.maxPageSize,
     );
     const safePage = Math.max(page ?? 1, 1);
@@ -71,9 +82,12 @@ export class OrdersRepository {
     });
   }
 
-  async findManyForCustomer(
-    criteria: OrderListCriteria,
-  ): Promise<{ rows: OrderForCustomerList[]; total: number; page: number; limit: number }> {
+  async findManyForCustomer(criteria: OrderListCriteria): Promise<{
+    rows: OrderForCustomerList[];
+    total: number;
+    page: number;
+    limit: number;
+  }> {
     const { page, limit, skip } = this.normalizePagination(
       criteria.page,
       criteria.limit,
@@ -146,7 +160,13 @@ export class OrdersRepository {
           include: {
             food: {
               include: {
-                enterprise: { select: { EnterpriseID: true, EnterpriseName: true, account: { select: { Avatar: true } } } },
+                enterprise: {
+                  select: {
+                    EnterpriseID: true,
+                    EnterpriseName: true,
+                    account: { select: { Avatar: true } },
+                  },
+                },
               },
             },
           },
@@ -203,7 +223,9 @@ export class OrdersRepository {
     );
 
     const base =
-      ctx.Metadata && typeof ctx.Metadata === 'object' && !Array.isArray(ctx.Metadata)
+      ctx.Metadata &&
+      typeof ctx.Metadata === 'object' &&
+      !Array.isArray(ctx.Metadata)
         ? (ctx.Metadata as Record<string, unknown>)
         : {};
 
@@ -211,7 +233,9 @@ export class OrdersRepository {
       ...base,
       cancelReason: params.cancelReason,
       cancelledAt: new Date().toISOString(),
-      ...(params.refundPending ? { refundPending: true, refundReason: params.cancelReason } : {}),
+      ...(params.refundPending
+        ? { refundPending: true, refundReason: params.cancelReason }
+        : {}),
     };
 
     // Atomic soft-cancel: only cancel if still Pending (and optional cutoff condition holds).
@@ -229,7 +253,10 @@ export class OrdersRepository {
       const latest = ctx.payments[0];
       if (latest?.PaymentMethod === PaymentMethod.Cash) {
         await this.prisma.payment.updateMany({
-          where: { OrderID: params.orderId, PaymentStatus: PaymentStatus.Pending },
+          where: {
+            OrderID: params.orderId,
+            PaymentStatus: PaymentStatus.Pending,
+          },
           data: { PaymentStatus: PaymentStatus.Failed },
         });
       }
@@ -336,47 +363,4 @@ export class OrdersRepository {
 
     return { order, orderDetails };
   }
-
-  async createReorderFromExisting(order: {
-    OrderID: string;
-    CustomerID: string;
-    VoucherID: string | null;
-    TotalAmount: Prisma.Decimal | number;
-    DeliveryAddress: string;
-    DeliveryNote: string | null;
-    orderDetails: Array<{
-      OrderDetailID: string;
-      OrderID: string;
-      FoodID: string;
-      SubTotal: Prisma.Decimal | number;
-      Quantity: number;
-    }>;
-  }) {
-    const newOrder = await this.prisma.order.create({
-      data: {
-        CustomerID: order.CustomerID,
-        VoucherID: order.VoucherID,
-        TotalAmount: order.TotalAmount,
-        DeliveryAddress: order.DeliveryAddress,
-        DeliveryNote: order.DeliveryNote,
-        Status: ORDER_STATUS.Pending,
-      },
-    });
-
-    await Promise.all(
-      order.orderDetails.map((item) =>
-        this.prisma.orderDetail.create({
-          data: {
-            OrderID: newOrder.OrderID,
-            FoodID: item.FoodID,
-            SubTotal: item.SubTotal,
-            Quantity: item.Quantity,
-          },
-        }),
-      ),
-    );
-
-    return newOrder;
-  }
 }
-
