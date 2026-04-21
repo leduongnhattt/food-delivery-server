@@ -26,6 +26,12 @@ import { ReviewsModule } from '@modules/reviews/reviews.module';
 import { EnterpriseActivationModule } from '@modules/enterprise/activation/enterprise-activation.module';
 import { EnterpriseReturnsController } from '@modules/enterprise/returns/enterprise-returns.controller';
 import { EnterpriseReturnsService } from '@modules/enterprise/returns/enterprise-returns.service';
+import { EnterpriseBankAccountsController } from '@modules/enterprise/bank-accounts/enterprise-bank-accounts.controller';
+import { EnterpriseBankAccountsService } from '@modules/enterprise/bank-accounts/enterprise-bank-accounts.service';
+import { EnterpriseIncomeController } from '@modules/enterprise/income/enterprise-income.controller';
+import { EnterpriseIncomeService } from '@modules/enterprise/income/enterprise-income.service';
+import { EnterpriseFinanceController } from '@modules/enterprise/finance/enterprise-finance.controller';
+import { EnterpriseFinanceService } from '@modules/enterprise/finance/enterprise-finance.service';
 
 @Module({
   imports: [AuthModule, VouchersModule, ReviewsModule, EnterpriseActivationModule],
@@ -41,6 +47,9 @@ import { EnterpriseReturnsService } from '@modules/enterprise/returns/enterprise
     EnterpriseProfileController,
     EnterpriseOrdersController,
     EnterpriseReturnsController,
+    EnterpriseBankAccountsController,
+    EnterpriseIncomeController,
+    EnterpriseFinanceController,
     EnterpriseVoucherController,
     EnterpriseLocalUploadController,
     EnterpriseReviewsController,
@@ -54,6 +63,9 @@ import { EnterpriseReturnsService } from '@modules/enterprise/returns/enterprise
     EnterpriseProfileService,
     EnterpriseOrdersService,
     EnterpriseReturnsService,
+    EnterpriseBankAccountsService,
+    EnterpriseIncomeService,
+    EnterpriseFinanceService,
     EnterpriseVoucherService,
   ],
 })

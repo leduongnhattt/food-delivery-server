@@ -1,8 +1,8 @@
 import { deleteKey } from '@infra/redis/redis.service';
 
 const CACHE_KEYS = {
-  orders: (enterpriseId: string) => `enterprise:${enterpriseId}:orders:v3`,
-  recent: (enterpriseId: string) => `enterprise:${enterpriseId}:recent_orders:v3`,
+  orders: (enterpriseId: string) => `enterprise:${enterpriseId}:orders:v4`,
+  recent: (enterpriseId: string) => `enterprise:${enterpriseId}:recent_orders:v4`,
   stats: (enterpriseId: string) => `enterprise:${enterpriseId}:stats`,
   revenue: (enterpriseId: string) => `enterprise:${enterpriseId}:revenue`,
 } as const;

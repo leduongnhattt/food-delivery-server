@@ -1,8 +1,10 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
   Get,
+  NotFoundException,
   Param,
   Patch,
   Post,
@@ -113,6 +115,49 @@ export class CartController {
     } catch (e) {
       console.error('GET /cart failed', e);
       return res.status(500).json({ error: 'Failed to get cart' });
+    }
+  }
+
+  @Post('from-order/:orderId')
+  async populateFromOrder(
+    @Req() req: Request,
+    @Res() res: Response,
+    @Param('orderId') orderId: string,
+  ) {
+    try {
+      const actor = getActorFromRequest(req);
+      if (!actor.userId) {
+        return res.status(401).json({ error: 'Login required' });
+      }
+      const snap = await this.cartService.populateCartFromOrder(
+        actor.userId,
+        orderId,
+      );
+      return res.status(200).json(snap);
+    } catch (e) {
+      if (e instanceof NotFoundException) {
+        return res.status(404).json({
+          message:
+            typeof e.message === 'string' ? e.message : 'Order not found',
+        });
+      }
+      if (e instanceof BadRequestException) {
+        const body = e.getResponse();
+        const message =
+          typeof body === 'string'
+            ? body
+            : typeof body === 'object' &&
+                body !== null &&
+                'message' in body &&
+                typeof (body as { message?: unknown }).message === 'string'
+              ? (body as { message: string }).message
+              : 'Bad request';
+        return res.status(400).json({ message });
+      }
+      console.error('POST /cart/from-order failed', e);
+      return res
+        .status(500)
+        .json({ error: 'Failed to populate cart from order' });
     }
   }
 
