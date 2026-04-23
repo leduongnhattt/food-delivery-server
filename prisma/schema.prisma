@@ -199,6 +199,9 @@ model Admin {
   assignedSupportTickets Support[] @relation("SupportAssignedAdmin")
   platformCommissionDefaultsUpdated     PlatformCommissionDefault[]     @relation("PlatformCommissionDefaultUpdatedBy")
   categoryCommissionDefaultsUpdated     CategoryCommissionDefault[]     @relation("CategoryCommissionDefaultUpdatedBy")
+  transactionFeeGlobalDefaultsUpdated  TransactionFeeGlobalDefault[]   @relation("TransactionFeeGlobalDefaultUpdatedBy")
+  transactionFeeRulesCreated           TransactionFeeRule[]            @relation("TransactionFeeRuleCreatedBy")
+  transactionFeeRulesUpdated           TransactionFeeRule[]            @relation("TransactionFeeRuleUpdatedBy")
   deductionRulesCreated               DeductionRule[]                  @relation("DeductionRuleCreatedBy")
   settlementDeductionsCreated          SettlementDeduction[]            @relation("SettlementDeductionCreatedBy")
 
@@ -508,6 +511,55 @@ model Payment {
   @@map("PAYMENT")
 }
 
+model TransactionFeeRule {
+  FeeID              String      @id @default(uuid()) @db.VarChar(36)
+  FeeName            String      @db.VarChar(255)
+
+  PaymentMethod      PaymentMethod
+  PaymentProviderCode String?    @db.VarChar(50)
+
+  RatePercent        Decimal     @db.Decimal(5, 2)
+  IsActive           Boolean     @default(true)
+  EffectiveFrom      DateTime    @default(now())
+  EffectiveTo        DateTime?
+
+  CreatedAt          DateTime    @default(now())
+  UpdatedAt          DateTime?   @updatedAt
+  CreatedByAdminID   String?     @db.VarChar(36)
+  UpdatedByAdminID   String?     @db.VarChar(36)
+
+  createdBy Admin? @relation("TransactionFeeRuleCreatedBy", fields: [CreatedByAdminID], references: [AdminID], onDelete: SetNull)
+  updatedBy Admin? @relation("TransactionFeeRuleUpdatedBy", fields: [UpdatedByAdminID], references: [AdminID], onDelete: SetNull)
+
+  @@index([PaymentMethod])
+  @@index([PaymentProviderCode])
+  @@index([IsActive])
+  @@index([EffectiveFrom, EffectiveTo])
+  @@index([CreatedByAdminID])
+  @@index([UpdatedByAdminID])
+  @@unique([PaymentMethod, PaymentProviderCode, EffectiveFrom])
+  @@map("TRANSACTION_FEE_RULE")
+}
+
+model TransactionFeeGlobalDefault {
+  DefaultID          String    @id @default("00000000-0000-0000-0000-000000000002") @db.VarChar(36)
+  RuleName           String?   @db.VarChar(255)
+  RatePercent        Decimal   @db.Decimal(5, 2)
+  IsActive           Boolean   @default(true)
+  EffectiveFrom      DateTime  @default(now())
+  EffectiveTo        DateTime?
+  CreatedAt          DateTime  @default(now())
+  UpdatedAt          DateTime? @updatedAt
+  UpdatedByAdminID   String?   @db.VarChar(36)
+
+  updatedBy Admin? @relation("TransactionFeeGlobalDefaultUpdatedBy", fields: [UpdatedByAdminID], references: [AdminID], onDelete: SetNull)
+
+  @@index([IsActive])
+  @@index([EffectiveFrom, EffectiveTo])
+  @@index([UpdatedByAdminID])
+  @@map("TRANSACTION_FEE_GLOBAL_DEFAULT")
+}
+
 model Settlement {
   SettlementID  String   @id @default(uuid()) @db.VarChar(36)
   EnterpriseID  String   @db.VarChar(36)
@@ -546,7 +598,9 @@ model SettlementItem {
 
 model PlatformCommissionDefault {
   DefaultID         String    @id @default("00000000-0000-0000-0000-000000000001") @db.VarChar(36)
+  RuleName          String?   @db.VarChar(255)
   CommissionPercent Decimal   @db.Decimal(5, 2)
+  CreatedAt         DateTime  @default(now())
   UpdatedAt         DateTime? @updatedAt
   UpdatedByAdminID  String?   @db.VarChar(36)
 
@@ -559,8 +613,10 @@ model PlatformCommissionDefault {
 model CategoryCommissionDefault {
   CommissionDefaultID String    @id @default(uuid()) @db.VarChar(36)
   FoodCategoryID      String    @db.VarChar(36)
+  RuleName            String?   @db.VarChar(255)
   CommissionPercent   Decimal   @db.Decimal(5, 2)
   IsActive            Boolean   @default(true)
+  CreatedAt           DateTime  @default(now())
   EffectiveFrom       DateTime  @default(now())
   EffectiveTo         DateTime?
   UpdatedAt           DateTime? @updatedAt
