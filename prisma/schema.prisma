@@ -197,9 +197,11 @@ model Admin {
   vouchers Voucher[]
   foodCategories FoodCategory[]
   assignedSupportTickets Support[] @relation("SupportAssignedAdmin")
-  platformCommissionDefaultsUpdated     PlatformCommissionDefault[]     @relation("PlatformCommissionDefaultUpdatedBy")
+  platformCommissionGlobalRulesCreated PlatformCommissionGlobalRule[]  @relation("PlatformCommissionGlobalRuleCreatedBy")
+  platformCommissionGlobalRulesUpdated PlatformCommissionGlobalRule[]  @relation("PlatformCommissionGlobalRuleUpdatedBy")
   categoryCommissionDefaultsUpdated     CategoryCommissionDefault[]     @relation("CategoryCommissionDefaultUpdatedBy")
-  transactionFeeGlobalDefaultsUpdated  TransactionFeeGlobalDefault[]   @relation("TransactionFeeGlobalDefaultUpdatedBy")
+  transactionFeeGlobalRulesCreated     TransactionFeeGlobalRule[]      @relation("TransactionFeeGlobalRuleCreatedBy")
+  transactionFeeGlobalRulesUpdated     TransactionFeeGlobalRule[]      @relation("TransactionFeeGlobalRuleUpdatedBy")
   transactionFeeRulesCreated           TransactionFeeRule[]            @relation("TransactionFeeRuleCreatedBy")
   transactionFeeRulesUpdated           TransactionFeeRule[]            @relation("TransactionFeeRuleUpdatedBy")
   deductionRulesCreated               DeductionRule[]                  @relation("DeductionRuleCreatedBy")
@@ -520,8 +522,10 @@ model TransactionFeeRule {
 
   RatePercent        Decimal     @db.Decimal(5, 2)
   IsActive           Boolean     @default(true)
+  ActivatedAt        DateTime?
   EffectiveFrom      DateTime    @default(now())
   EffectiveTo        DateTime?
+  DeletedAt          DateTime?
 
   CreatedAt          DateTime    @default(now())
   UpdatedAt          DateTime?   @updatedAt
@@ -534,30 +538,39 @@ model TransactionFeeRule {
   @@index([PaymentMethod])
   @@index([PaymentProviderCode])
   @@index([IsActive])
+  @@index([ActivatedAt])
   @@index([EffectiveFrom, EffectiveTo])
+  @@index([DeletedAt])
   @@index([CreatedByAdminID])
   @@index([UpdatedByAdminID])
   @@unique([PaymentMethod, PaymentProviderCode, EffectiveFrom])
   @@map("TRANSACTION_FEE_RULE")
 }
 
-model TransactionFeeGlobalDefault {
-  DefaultID          String    @id @default("00000000-0000-0000-0000-000000000002") @db.VarChar(36)
-  RuleName           String?   @db.VarChar(255)
-  RatePercent        Decimal   @db.Decimal(5, 2)
-  IsActive           Boolean   @default(true)
-  EffectiveFrom      DateTime  @default(now())
-  EffectiveTo        DateTime?
-  CreatedAt          DateTime  @default(now())
-  UpdatedAt          DateTime? @updatedAt
-  UpdatedByAdminID   String?   @db.VarChar(36)
+model TransactionFeeGlobalRule {
+  RuleID            String    @id @default(uuid()) @db.VarChar(36)
+  RuleName          String?   @db.VarChar(255)
+  RatePercent       Decimal   @db.Decimal(5, 2)
+  IsActive          Boolean   @default(false)
+  ActivatedAt       DateTime?
+  EffectiveFrom     DateTime  @default(now())
+  EffectiveTo       DateTime?
+  DeletedAt         DateTime?
+  CreatedAt         DateTime  @default(now())
+  UpdatedAt         DateTime? @updatedAt
+  CreatedByAdminID  String?   @db.VarChar(36)
+  UpdatedByAdminID  String?   @db.VarChar(36)
 
-  updatedBy Admin? @relation("TransactionFeeGlobalDefaultUpdatedBy", fields: [UpdatedByAdminID], references: [AdminID], onDelete: SetNull)
+  createdBy Admin? @relation("TransactionFeeGlobalRuleCreatedBy", fields: [CreatedByAdminID], references: [AdminID], onDelete: SetNull)
+  updatedBy Admin? @relation("TransactionFeeGlobalRuleUpdatedBy", fields: [UpdatedByAdminID], references: [AdminID], onDelete: SetNull)
 
   @@index([IsActive])
+  @@index([ActivatedAt])
   @@index([EffectiveFrom, EffectiveTo])
+  @@index([DeletedAt])
+  @@index([CreatedByAdminID])
   @@index([UpdatedByAdminID])
-  @@map("TRANSACTION_FEE_GLOBAL_DEFAULT")
+  @@map("TRANSACTION_FEE_GLOBAL_RULE")
 }
 
 model Settlement {
@@ -596,18 +609,30 @@ model SettlementItem {
   @@map("SETTLEMENT_ITEM")
 }
 
-model PlatformCommissionDefault {
-  DefaultID         String    @id @default("00000000-0000-0000-0000-000000000001") @db.VarChar(36)
+model PlatformCommissionGlobalRule {
+  RuleID            String    @id @default(uuid()) @db.VarChar(36)
   RuleName          String?   @db.VarChar(255)
   CommissionPercent Decimal   @db.Decimal(5, 2)
+  IsActive          Boolean   @default(false)
+  ActivatedAt       DateTime?
+  EffectiveFrom     DateTime  @default(now())
+  EffectiveTo       DateTime?
+  DeletedAt         DateTime?
   CreatedAt         DateTime  @default(now())
   UpdatedAt         DateTime? @updatedAt
+  CreatedByAdminID  String?   @db.VarChar(36)
   UpdatedByAdminID  String?   @db.VarChar(36)
 
-  updatedBy Admin? @relation("PlatformCommissionDefaultUpdatedBy", fields: [UpdatedByAdminID], references: [AdminID], onDelete: SetNull)
+  createdBy Admin? @relation("PlatformCommissionGlobalRuleCreatedBy", fields: [CreatedByAdminID], references: [AdminID], onDelete: SetNull)
+  updatedBy Admin? @relation("PlatformCommissionGlobalRuleUpdatedBy", fields: [UpdatedByAdminID], references: [AdminID], onDelete: SetNull)
 
+  @@index([IsActive])
+  @@index([ActivatedAt])
+  @@index([EffectiveFrom, EffectiveTo])
+  @@index([DeletedAt])
+  @@index([CreatedByAdminID])
   @@index([UpdatedByAdminID])
-  @@map("PLATFORM_COMMISSION_DEFAULT")
+  @@map("PLATFORM_COMMISSION_GLOBAL_RULE")
 }
 
 model CategoryCommissionDefault {
@@ -616,10 +641,12 @@ model CategoryCommissionDefault {
   RuleName            String?   @db.VarChar(255)
   CommissionPercent   Decimal   @db.Decimal(5, 2)
   IsActive            Boolean   @default(true)
+  ActivatedAt         DateTime?
   CreatedAt           DateTime  @default(now())
   EffectiveFrom       DateTime  @default(now())
   EffectiveTo         DateTime?
   UpdatedAt           DateTime? @updatedAt
+  DeletedAt           DateTime?
   UpdatedByAdminID    String?   @db.VarChar(36)
 
   foodCategory FoodCategory @relation(fields: [FoodCategoryID], references: [CategoryID], onDelete: Cascade)
@@ -628,7 +655,9 @@ model CategoryCommissionDefault {
   @@unique([FoodCategoryID, EffectiveFrom])
   @@index([FoodCategoryID])
   @@index([IsActive])
+  @@index([ActivatedAt])
   @@index([EffectiveFrom, EffectiveTo])
+  @@index([DeletedAt])
   @@index([UpdatedByAdminID])
   @@map("CATEGORY_COMMISSION_DEFAULT")
 }

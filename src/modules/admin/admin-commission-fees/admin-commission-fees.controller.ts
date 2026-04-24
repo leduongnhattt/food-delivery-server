@@ -24,19 +24,89 @@ export class AdminCommissionFeesController {
     if (!account?.accountId) {
       throw new UnauthorizedException('Unauthorized');
     }
-    return this.service.getGlobal();
+    return this.service.getActiveGlobalRule();
+  }
+
+  @Get('global-rules')
+  @UseGuards(JwtAuthGuard, AdminRoleGuard)
+  listGlobalRules(@CurrentAccount() account: JwtPayload | null) {
+    if (!account?.accountId) {
+      throw new UnauthorizedException('Unauthorized');
+    }
+    return this.service.listGlobalRules();
+  }
+
+  @Post('global-rules')
+  @UseGuards(JwtAuthGuard, AdminRoleGuard)
+  createGlobalRule(
+    @CurrentAccount() account: JwtPayload | null,
+    @Body()
+    body: {
+      ruleName?: unknown;
+      commissionPercent?: unknown;
+      isActive?: unknown;
+      effectiveFrom?: unknown;
+      effectiveTo?: unknown;
+    },
+  ) {
+    if (!account?.accountId) {
+      throw new UnauthorizedException('Unauthorized');
+    }
+    return this.service.createGlobalRule(account.accountId, body);
+  }
+
+  @Patch('global-rules/:ruleId')
+  @UseGuards(JwtAuthGuard, AdminRoleGuard)
+  patchGlobalRule(
+    @CurrentAccount() account: JwtPayload | null,
+    @Param('ruleId') ruleId: string,
+    @Body()
+    body: {
+      ruleName?: unknown;
+      commissionPercent?: unknown;
+      isActive?: unknown;
+      effectiveFrom?: unknown;
+      effectiveTo?: unknown;
+    },
+  ) {
+    if (!account?.accountId) {
+      throw new UnauthorizedException('Unauthorized');
+    }
+    return this.service.updateGlobalRule(account.accountId, ruleId, body);
+  }
+
+  @Patch('global-rules/:ruleId/activate')
+  @UseGuards(JwtAuthGuard, AdminRoleGuard)
+  activateGlobalRule(
+    @CurrentAccount() account: JwtPayload | null,
+    @Param('ruleId') ruleId: string,
+  ) {
+    if (!account?.accountId) {
+      throw new UnauthorizedException('Unauthorized');
+    }
+    return this.service.activateGlobalRule(account.accountId, ruleId);
   }
 
   @Patch('global')
   @UseGuards(JwtAuthGuard, AdminRoleGuard)
   patchGlobal(
     @CurrentAccount() account: JwtPayload | null,
-    @Body() body: { ruleName?: unknown; commissionPercent?: unknown },
+    @Body()
+    body: {
+      ruleName?: unknown;
+      commissionPercent?: unknown;
+      isActive?: unknown;
+      effectiveFrom?: unknown;
+      effectiveTo?: unknown;
+    },
   ) {
     if (!account?.accountId) {
       throw new UnauthorizedException('Unauthorized');
     }
-    return this.service.updateGlobal(account.accountId, body);
+    // Back-compat: PATCH /global creates a new rule (pending by default).
+    return this.service.createGlobalRule(account.accountId, body, {
+      forceActivate: false,
+    });
   }
 
   @Get('category-rules')
@@ -47,6 +117,7 @@ export class AdminCommissionFeesController {
     @Query('pageSize') pageSize?: string,
     @Query('search') search?: string,
     @Query('foodCategoryId') foodCategoryId?: string,
+    @Query('status') status?: string,
     @Query('isActive') isActive?: string,
     @Query('effectiveFrom') effectiveFrom?: string,
     @Query('effectiveTo') effectiveTo?: string,
@@ -59,6 +130,7 @@ export class AdminCommissionFeesController {
       pageSize,
       search,
       foodCategoryId,
+      status,
       isActive,
       effectiveFrom,
       effectiveTo,
