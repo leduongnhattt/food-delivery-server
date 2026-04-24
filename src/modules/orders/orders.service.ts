@@ -8,7 +8,6 @@ import {
   OrderListCriteria,
 } from '@infra/repositories/orders.repository';
 import { CustomersService } from '@modules/customers/customers.service';
-import { PAYMENT_METHOD } from '@common/constants/payment-method.constants';
 import { ORDER_CANCEL_REASON } from '@common/constants/order-payment-status.constants';
 import { deleteKey } from '@infra/redis/redis.service';
 import { EtaService } from '@modules/shipping/eta.service';
