@@ -181,7 +181,9 @@ export class OrdersService {
           typeof meta.cancelledAt === 'string' ? meta.cancelledAt : null,
         deliveryAddress: order.DeliveryAddress,
         deliveryInstructions: order.DeliveryNote ?? undefined,
-        paymentMethod: 'card',
+        paymentMethod: latestPayment?.PaymentMethod
+          ? String(latestPayment.PaymentMethod).toLowerCase()
+          : 'cash',
         paymentStatus: latestPayment?.PaymentStatus
           ? String(latestPayment.PaymentStatus).toLowerCase()
           : null,
@@ -259,8 +261,9 @@ export class OrdersService {
         typeof meta['cancelledAt'] === 'string' ? meta['cancelledAt'] : null,
       deliveryAddress: order.DeliveryAddress,
       deliveryInstructions: order.DeliveryNote || undefined,
-      paymentMethod:
-        order.payments[0]?.PaymentMethod || PAYMENT_METHOD.CreditCard,
+      paymentMethod: latestPayment?.PaymentMethod
+        ? String(latestPayment.PaymentMethod).toLowerCase()
+        : 'cash',
       paymentStatus: latestPayment?.PaymentStatus
         ? String(latestPayment.PaymentStatus).toLowerCase()
         : null,

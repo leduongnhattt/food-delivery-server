@@ -1,10 +1,10 @@
-import { Injectable } from "@nestjs/common";
-import { OrderStatus, PaymentMethod } from "@prisma/client";
+import { Injectable, BadRequestException } from "@nestjs/common";
+import { OrderStatus, PaymentMethod, PaymentStatus } from "@prisma/client";
 import { PrismaService } from "@src/infra/prisma/prisma.service";
 
 @Injectable()
 export class AdminOrdersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) { }
 
   private buildWhere(params: {
     orderId?: string;
@@ -12,6 +12,7 @@ export class AdminOrdersService {
     buyerSearch?: string;
     status?: OrderStatus;
     paymentMethod?: string;
+    paymentStatus?: PaymentStatus;
     fromDate?: Date;
     toDate?: Date;
   }) {
@@ -21,60 +22,90 @@ export class AdminOrdersService {
 
         params.enterpriseId
           ? {
-              orderDetails: {
-                some: {
-                  food: {
-                    EnterpriseID: params.enterpriseId,
-                  },
+            orderDetails: {
+              some: {
+                food: {
+                  EnterpriseID: params.enterpriseId,
                 },
               },
-            }
+            },
+          }
           : {},
 
         params.status ? { Status: params.status } : {},
 
         params.paymentMethod
           ? {
-              payments: {
-                some: {
-                  PaymentMethod: params.paymentMethod as PaymentMethod,
-                },
+            payments: {
+              some: {
+                PaymentMethod: params.paymentMethod as PaymentMethod,
               },
-            }
+            },
+          }
+          : {},
+
+        params.paymentStatus
+          ? {
+            payments: {
+              some: {
+                PaymentStatus: params.paymentStatus,
+              },
+            },
+          }
           : {},
 
         params.buyerSearch
           ? {
-              customer: {
-                account: {
-                  OR: [
-                    { Email: { contains: params.buyerSearch } },
-                    { Username: { contains: params.buyerSearch } },
-                  ],
+            OR: [
+              {
+                customer: {
+                  FullName: { contains: params.buyerSearch },
                 },
               },
-            }
+              {
+                customer: {
+                  account: {
+                    OR: [
+                      { Email: { contains: params.buyerSearch } },
+                      { Username: { contains: params.buyerSearch } },
+                    ],
+                  },
+                },
+              },
+              {
+                orderDetails: {
+                  some: {
+                    food: {
+                      enterprise: {
+                        EnterpriseName: { contains: params.buyerSearch },
+                      },
+                    },
+                  },
+                },
+              },
+            ],
+          }
           : {},
 
         params.fromDate || params.toDate
           ? {
-              OrderDate: {
-                ...(params.fromDate && { gte: params.fromDate }),
-                ...(params.toDate && { lte: params.toDate }),
-              },
-            }
+            OrderDate: {
+              ...(params.fromDate && { gte: params.fromDate }),
+              ...(params.toDate && { lte: params.toDate }),
+            },
+          }
           : {},
       ],
     };
   }
 
-  // Danh sách đơn hàng với phân trang cursor-based, search theo mã đơn hàng, from to date, sắp xếp theo ngày mới nhất
   async listOrders(params: {
     orderId?: string;
     enterpriseId?: string;
     buyerSearch?: string;
     status?: OrderStatus;
     paymentMethod?: string;
+    paymentStatus?: PaymentStatus;
     fromDate?: Date;
     toDate?: Date;
     take: number;
@@ -89,9 +120,9 @@ export class AdminOrdersService {
 
       ...(params.cursor
         ? {
-            cursor: { OrderID: params.cursor },
-            skip: 1,
-          }
+          cursor: { OrderID: params.cursor },
+          skip: 1,
+        }
         : {}),
 
       orderBy: [{ OrderDate: 'desc' }, { OrderID: 'desc' }],
@@ -103,6 +134,8 @@ export class AdminOrdersService {
         OrderDate: true,
 
         payments: {
+          orderBy: { PaymentDate: "desc" },
+          take: 1,
           select: {
             PaymentMethod: true,
             PaymentDate: true,
@@ -122,6 +155,20 @@ export class AdminOrdersService {
             },
           },
         },
+
+        orderDetails: {
+          select: {
+            food: {
+              select: {
+                enterprise: {
+                  select: {
+                    EnterpriseName: true,
+                  },
+                },
+              },
+            },
+          },
+        },
       },
     });
 
@@ -132,13 +179,25 @@ export class AdminOrdersService {
       nextCursor = next?.OrderID ?? null;
     }
 
-    return {
-      items: rows,
-      nextCursor,
-    };
+    const items = rows.map((r) => {
+      const sellers = Array.from(
+        new Set(
+          (r.orderDetails ?? [])
+            .map((d) => d.food?.enterprise?.EnterpriseName)
+            .filter((x): x is string => typeof x === "string" && !!x.trim())
+            .map((x) => x.trim()),
+        ),
+      );
+
+      // Keep list payload compact: expose computed sellers instead of full orderDetails.
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { orderDetails, ...rest } = r;
+      return { ...rest, sellers };
+    });
+
+    return { items, nextCursor };
   }
 
-  // Lấy chi tiết đơn hàng cho modal ở FE
   async getOrderById(orderId: string) {
     const order = await this.prisma.order.findUnique({
       where: { OrderID: orderId },
@@ -179,5 +238,21 @@ export class AdminOrdersService {
       throw new Error('Order not found');
     }
     return order;
+  }
+
+  async deleteOrder(orderId: string): Promise<{ success: true }> {
+    if (!orderId?.trim()) {
+      throw new BadRequestException("Order id is required");
+    }
+
+    // Mirror safe cascade used by OrdersRepository.deleteOrderCascade
+    await this.prisma.$transaction(async (tx) => {
+      await tx.settlementItem.deleteMany({ where: { OrderID: orderId } });
+      await tx.payment.deleteMany({ where: { OrderID: orderId } });
+      await tx.orderDetail.deleteMany({ where: { OrderID: orderId } });
+      await tx.order.delete({ where: { OrderID: orderId } });
+    });
+
+    return { success: true };
   }
 }

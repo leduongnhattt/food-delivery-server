@@ -39,6 +39,7 @@ export class AdminCustomersService {
       CustomerID: string;
       FullName: string;
       PhoneNumber: string;
+      Address: string;
       account: {
         AccountID: string;
         Email: string;
@@ -60,6 +61,7 @@ export class AdminCustomersService {
         CustomerID: true,
         FullName: true,
         PhoneNumber: true,
+        Address: true,
         account: {
           select: {
             AccountID: true,

@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '@infra/prisma/prisma.service';
 import { deleteKey, getKeyJson, setKeyJson } from '@infra/redis/redis.service';
-import { OrderStatus, PaymentStatus, Prisma } from '@prisma/client';
+import { OrderStatus, PaymentMethod, PaymentStatus, Prisma } from '@prisma/client';
 import { ORDER_STATUS } from '@common/constants/order-payment-status.constants';
 import { isEnterpriseTransitionAllowed } from '@modules/enterprise/orders/enterprise-order-status.transitions';
 
@@ -610,8 +610,56 @@ export class EnterpriseOrdersService {
         Status: target,
         Metadata: nextMeta,
       };
+
+      const hasAnyPayment = await tx.payment.findFirst({
+        where: { OrderID: orderId },
+        select: { PaymentID: true },
+      });
+
+      if (target === ORDER_STATUS.Confirmed && !hasAnyPayment) {
+        await tx.payment.create({
+          data: {
+            OrderID: orderId,
+            PaymentMethod: PaymentMethod.Cash,
+            PaymentStatus: PaymentStatus.Pending,
+            TransactionID: null,
+          },
+        });
+      }
+
       if (target === ORDER_STATUS.Delivered) {
         data.DeliveredAt = new Date();
+
+        // Complete COD payment on delivery (idempotent).
+        const updated = await tx.payment.updateMany({
+          where: {
+            OrderID: orderId,
+            PaymentMethod: PaymentMethod.Cash,
+            PaymentStatus: PaymentStatus.Pending,
+          },
+          data: {
+            PaymentStatus: PaymentStatus.Completed,
+            PaymentDate: new Date(),
+          },
+        });
+
+        // Backfill safety: if cash payment does not exist yet, create as Completed.
+        if (updated.count === 0) {
+          const cashExists = await tx.payment.findFirst({
+            where: { OrderID: orderId, PaymentMethod: PaymentMethod.Cash },
+            select: { PaymentID: true },
+          });
+          if (!cashExists) {
+            await tx.payment.create({
+              data: {
+                OrderID: orderId,
+                PaymentMethod: PaymentMethod.Cash,
+                PaymentStatus: PaymentStatus.Completed,
+                TransactionID: null,
+              },
+            });
+          }
+        }
       }
       if (target === ORDER_STATUS.Cancelled) {
         await tx.payment.updateMany({
