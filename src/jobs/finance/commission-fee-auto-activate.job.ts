@@ -2,10 +2,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '@infra/prisma/prisma.service';
 
-function getActivateAfterHours(): number {
-  const raw = process.env.FINANCE_RULE_AUTO_ACTIVATE_AFTER_HOURS;
-  const n = raw ? Number(raw) : 24;
-  if (!Number.isFinite(n) || n <= 0) return 24;
+function getActivateAfterMinutes(): number {
+  const raw = process.env.FINANCE_RULE_AUTO_ACTIVATE_AFTER_MINUTES;
+  const n = raw ? Number(raw) : 10;
+  if (!Number.isFinite(n) || n <= 0) return 10;
   return n;
 }
 
@@ -16,64 +16,130 @@ export class CommissionFeeAutoActivateJob {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * Auto-activate pending commission rules after a cooldown window.
+   * Auto-activate pending commission rules after a short review window.
    *
    * - Global: activates the most recent eligible pending rule and ensures only one global is active.
-   * - Category rules: activates eligible pending rules in bulk.
+   * - Category rules: at most one active rule per `FoodCategoryID` (same semantics as admin PATCH).
    *
-   * Runs hourly; eligibility is based on `CreatedAt` and `EffectiveFrom`.
+   * Also reconciles duplicate Active rows per category (e.g. legacy bulk-activate), keeping the
+   * rule with latest `EffectiveFrom` then `CreatedAt`.
+   *
+   * Runs every 10 minutes; eligibility is based on `EffectiveFrom` (start reached) and a short
+   * "cooldown" based on `CreatedAt` (defaults to 10 minutes).
    */
-  @Cron('0 */1 * * *')
-  async runHourly(): Promise<void> {
-    const hours = getActivateAfterHours();
+  @Cron('*/10 * * * *')
+  async runEveryTenMinutes(): Promise<void> {
+    const minutes = getActivateAfterMinutes();
     const now = new Date();
-    const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000);
+    const cutoff = new Date(Date.now() - minutes * 60 * 1000);
 
-    const [categoryRes, globalActivated] = await this.prisma.$transaction(async (tx) => {
-      const categoryRes = await tx.categoryCommissionDefault.updateMany({
-        where: {
-          DeletedAt: null,
-          IsActive: false,
-          ActivatedAt: null,
-          CreatedAt: { lte: cutoff },
-          EffectiveFrom: { lte: now },
-        },
-        data: { IsActive: true, ActivatedAt: now },
-      });
+    const [categoryActivated, categoryHealed, globalActivated] = await this.prisma.$transaction(
+      async (tx) => {
+        const eligibleCategory = await tx.categoryCommissionDefault.findMany({
+          where: {
+            DeletedAt: null,
+            IsActive: false,
+            ActivatedAt: null,
+            ExpiredAt: null,
+            EffectiveFrom: { lte: now },
+            OR: [{ EffectiveTo: null }, { EffectiveTo: { gte: now } }],
+            CreatedAt: { lte: cutoff },
+          },
+          orderBy: [
+            { FoodCategoryID: 'asc' },
+            { EffectiveFrom: 'desc' },
+            { CreatedAt: 'desc' },
+          ],
+          select: { CommissionDefaultID: true, FoodCategoryID: true },
+        });
 
-      const eligibleGlobal = await tx.platformCommissionGlobalRule.findFirst({
-        where: {
-          DeletedAt: null,
-          IsActive: false,
-          ActivatedAt: null,
-          CreatedAt: { lte: cutoff },
-          EffectiveFrom: { lte: now },
-        },
-        orderBy: [{ EffectiveFrom: 'desc' }, { CreatedAt: 'desc' }],
-        select: { RuleID: true },
-      });
+        let activated = 0;
+        let lastFoodCategoryId: string | null = null;
+        for (const r of eligibleCategory) {
+          if (r.FoodCategoryID === lastFoodCategoryId) continue;
+          lastFoodCategoryId = r.FoodCategoryID;
 
-      if (!eligibleGlobal) {
-        return [categoryRes, false] as const;
-      }
+          await tx.categoryCommissionDefault.updateMany({
+            where: {
+              FoodCategoryID: r.FoodCategoryID,
+              DeletedAt: null,
+              ExpiredAt: null,
+              IsActive: true,
+              NOT: { CommissionDefaultID: r.CommissionDefaultID },
+            },
+            data: { IsActive: false },
+          });
+          await tx.categoryCommissionDefault.update({
+            where: { CommissionDefaultID: r.CommissionDefaultID },
+            data: { IsActive: true, ActivatedAt: now },
+          });
+          activated += 1;
+        }
 
-      await tx.platformCommissionGlobalRule.updateMany({
-        where: { DeletedAt: null, IsActive: true },
-        data: { IsActive: false },
-      });
-      await tx.platformCommissionGlobalRule.update({
-        where: { RuleID: eligibleGlobal.RuleID },
-        data: { IsActive: true, ActivatedAt: now },
-      });
+        const activeSameWindow = await tx.categoryCommissionDefault.findMany({
+          where: {
+            DeletedAt: null,
+            ExpiredAt: null,
+            IsActive: true,
+            OR: [{ EffectiveTo: null }, { EffectiveTo: { gte: now } }],
+          },
+          orderBy: [
+            { FoodCategoryID: 'asc' },
+            { EffectiveFrom: 'desc' },
+            { CreatedAt: 'desc' },
+          ],
+          select: { CommissionDefaultID: true, FoodCategoryID: true },
+        });
 
-      return [categoryRes, true] as const;
-    });
+        let healed = 0;
+        let lastCatForHeal: string | null = null;
+        for (const r of activeSameWindow) {
+          if (r.FoodCategoryID !== lastCatForHeal) {
+            lastCatForHeal = r.FoodCategoryID;
+            continue;
+          }
+          await tx.categoryCommissionDefault.update({
+            where: { CommissionDefaultID: r.CommissionDefaultID },
+            data: { IsActive: false },
+          });
+          healed += 1;
+        }
 
-    if (categoryRes.count > 0 || globalActivated) {
+        const eligibleGlobal = await tx.platformCommissionGlobalRule.findFirst({
+          where: {
+            DeletedAt: null,
+            IsActive: false,
+            ActivatedAt: null,
+            ExpiredAt: null,
+            EffectiveFrom: { lte: now },
+            OR: [{ EffectiveTo: null }, { EffectiveTo: { gte: now } }],
+            CreatedAt: { lte: cutoff },
+          },
+          orderBy: [{ EffectiveFrom: 'desc' }, { CreatedAt: 'desc' }],
+          select: { RuleID: true },
+        });
+
+        if (!eligibleGlobal) {
+          return [activated, healed, false] as const;
+        }
+
+        await tx.platformCommissionGlobalRule.updateMany({
+          where: { DeletedAt: null, IsActive: true },
+          data: { IsActive: false },
+        });
+        await tx.platformCommissionGlobalRule.update({
+          where: { RuleID: eligibleGlobal.RuleID },
+          data: { IsActive: true, ActivatedAt: now },
+        });
+
+        return [activated, healed, true] as const;
+      },
+    );
+
+    if (categoryActivated > 0 || categoryHealed > 0 || globalActivated) {
       this.logger.log(
-        `Auto-activated commission rules (category=${categoryRes.count}, global=${globalActivated ? 1 : 0}, cutoff=${cutoff.toISOString()}, hours=${hours})`,
+        `Commission auto-activate (categoryActivated=${categoryActivated}, categoryHealedDuplicateActive=${categoryHealed}, global=${globalActivated ? 1 : 0}, cutoff=${cutoff.toISOString()}, minutes=${minutes})`,
       );
     }
   }
 }
-

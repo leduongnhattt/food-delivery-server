@@ -1,123 +1,67 @@
 import {
   BadRequestException,
-  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '@infra/prisma/prisma.service';
 import { asBoolean, asTrimmedString } from '@common/utils/parse.utils';
+import {
+  addDaysUtc,
+  isSameDateOnly,
+  parseDateOnlyEnd,
+  parseDateOnlyRequired,
+  parseDateOnlyStart,
+  parsePercentRequired,
+  todayDateOnlyUtc,
+  toDateOnlyString,
+} from '@common/utils/finance-rule.utils';
 
-function mapGlobalRuleRow(r: {
+function mapGlobalRuleRow(row: {
   RuleID: string;
   RuleName: string | null;
   CommissionPercent: Prisma.Decimal;
   IsActive: boolean;
   ActivatedAt: Date | null;
+  ExpiredAt?: Date | null;
   EffectiveFrom: Date;
   EffectiveTo: Date | null;
   CreatedAt: Date;
   UpdatedAt: Date | null;
   updatedBy: { account: { Username: string; Email: string } | null } | null;
 }) {
-  const u = r.updatedBy?.account;
+  const updatedByAccount = row.updatedBy?.account;
   return {
-    RuleID: r.RuleID,
-    RuleName: r.RuleName,
-    CommissionPercent: Number(r.CommissionPercent),
-    IsActive: r.IsActive,
-    ActivatedAt: r.ActivatedAt ? r.ActivatedAt.toISOString() : null,
-    EffectiveFrom: toDateOnlyString(r.EffectiveFrom),
-    EffectiveTo: r.EffectiveTo ? toDateOnlyString(r.EffectiveTo) : null,
-    CreatedAt: r.CreatedAt.toISOString(),
-    UpdatedAt: r.UpdatedAt?.toISOString() ?? null,
-    UpdatedByLabel: u?.Email || u?.Username || null,
+    RuleID: row.RuleID,
+    RuleName: row.RuleName,
+    CommissionPercent: Number(row.CommissionPercent),
+    IsActive: row.IsActive,
+    ActivatedAt: row.ActivatedAt ? row.ActivatedAt.toISOString() : null,
+    ExpiredAt: row.ExpiredAt ? row.ExpiredAt.toISOString() : null,
+    EffectiveFrom: toDateOnlyString(row.EffectiveFrom),
+    EffectiveTo: row.EffectiveTo ? toDateOnlyString(row.EffectiveTo) : null,
+    CreatedAt: row.CreatedAt.toISOString(),
+    UpdatedAt: row.UpdatedAt?.toISOString() ?? null,
+    UpdatedByLabel:
+      updatedByAccount?.Email || updatedByAccount?.Username || null,
   };
 }
 
 function parseCommissionPercent(value: unknown): number {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    if (value < 0 || value > 100) {
-      throw new BadRequestException(
-        'commissionPercent must be between 0 and 100',
-      );
-    }
-    return Math.round(value * 100) / 100;
-  }
-  if (typeof value === 'string' && value.trim()) {
-    const n = Number(value.trim().replace(',', '.'));
-    if (!Number.isFinite(n) || n < 0 || n > 100) {
-      throw new BadRequestException(
-        'commissionPercent must be between 0 and 100',
-      );
-    }
-    return Math.round(n * 100) / 100;
-  }
-  throw new BadRequestException('commissionPercent is required');
+  return parsePercentRequired(value, {
+    requiredMessage: 'commissionPercent is required',
+    outOfRangeMessage: 'commissionPercent must be between 0 and 100',
+  });
 }
 
-function parseDateOnlyStart(value: unknown): Date | null {
-  const s = asTrimmedString(value);
-  if (!s) return null;
-  const d = new Date(`${s}T00:00:00.000Z`);
-  if (Number.isNaN(d.getTime())) {
-    throw new BadRequestException('Invalid date value');
-  }
-  return d;
-}
-
-function parseDateOnlyEnd(value: unknown): Date | null {
-  const s = asTrimmedString(value);
-  if (!s) return null;
-  const d = new Date(`${s}T23:59:59.999Z`);
-  if (Number.isNaN(d.getTime())) {
-    throw new BadRequestException('Invalid date value');
-  }
-  return d;
-}
-
-function parseOptionalDateTime(value: unknown): Date | null {
-  const s = asTrimmedString(value);
-  if (!s) return null;
-  const d = new Date(s);
-  if (Number.isNaN(d.getTime())) {
-    throw new BadRequestException('Invalid date value');
-  }
-  return d;
-}
-
-function parseDateOnlyRequired(value: unknown, field: string): Date {
-  const s = asTrimmedString(value);
-  if (!s) throw new BadRequestException(`${field} is required`);
-  const d = new Date(`${s}T00:00:00.000Z`);
-  if (Number.isNaN(d.getTime())) {
-    throw new BadRequestException(`Invalid ${field}`);
-  }
-  return d;
-}
-
-function todayDateOnlyUtc(): Date {
-  const t = new Date();
-  return new Date(`${t.toISOString().slice(0, 10)}T00:00:00.000Z`);
-}
-
-function addDaysUtc(d: Date, days: number): Date {
-  const out = new Date(d);
-  out.setUTCDate(out.getUTCDate() + days);
-  return out;
-}
-
-function toDateOnlyString(d: Date): string {
-  return d.toISOString().slice(0, 10);
-}
-
-function mapCategoryRow(r: {
+function mapCategoryRow(row: {
   CommissionDefaultID: string;
   FoodCategoryID: string;
   RuleName: string | null;
   CommissionPercent: Prisma.Decimal;
   IsActive: boolean;
   ActivatedAt: Date | null;
+  ExpiredAt?: Date | null;
   EffectiveFrom: Date;
   EffectiveTo: Date | null;
   CreatedAt: Date;
@@ -126,26 +70,75 @@ function mapCategoryRow(r: {
     account: { Username: string; Email: string } | null;
   } | null;
 }) {
-  const u = r.updatedBy?.account;
-  const updatedByLabel = u?.Email || u?.Username || null;
+  const updatedByAccount = row.updatedBy?.account;
+  const updatedByLabel =
+    updatedByAccount?.Email || updatedByAccount?.Username || null;
   return {
-    CommissionDefaultID: r.CommissionDefaultID,
-    FoodCategoryID: r.FoodCategoryID,
-    CategoryName: r.foodCategory.CategoryName,
-    RuleName: r.RuleName,
-    CommissionPercent: Number(r.CommissionPercent),
-    IsActive: r.IsActive,
-    ActivatedAt: r.ActivatedAt ? r.ActivatedAt.toISOString() : null,
-    EffectiveFrom: toDateOnlyString(r.EffectiveFrom),
-    EffectiveTo: r.EffectiveTo ? toDateOnlyString(r.EffectiveTo) : null,
-    CreatedAt: r.CreatedAt.toISOString().slice(0, 10),
+    CommissionDefaultID: row.CommissionDefaultID,
+    FoodCategoryID: row.FoodCategoryID,
+    CategoryName: row.foodCategory.CategoryName,
+    RuleName: row.RuleName,
+    CommissionPercent: Number(row.CommissionPercent),
+    IsActive: row.IsActive,
+    ActivatedAt: row.ActivatedAt ? row.ActivatedAt.toISOString() : null,
+    ExpiredAt: row.ExpiredAt ? row.ExpiredAt.toISOString() : null,
+    EffectiveFrom: toDateOnlyString(row.EffectiveFrom),
+    EffectiveTo: row.EffectiveTo ? toDateOnlyString(row.EffectiveTo) : null,
+    CreatedAt: row.CreatedAt.toISOString().slice(0, 10),
     UpdatedByLabel: updatedByLabel,
   };
 }
 
+/** Sentinel `FoodCategoryID` for global rows merged into category-rules list (not a real category). */
+const GLOBAL_RULE_LIST_FOOD_CATEGORY_ID = '__GLOBAL__';
+
+function mapGlobalRuleToCategoryListRow(row: {
+  RuleID: string;
+  RuleName: string | null;
+  CommissionPercent: Prisma.Decimal;
+  IsActive: boolean;
+  ActivatedAt: Date | null;
+  ExpiredAt?: Date | null;
+  EffectiveFrom: Date;
+  EffectiveTo: Date | null;
+  CreatedAt: Date;
+  updatedBy: {
+    account: { Username: string; Email: string } | null;
+  } | null;
+}) {
+  const updatedByAccount = row.updatedBy?.account;
+  const updatedByLabel =
+    updatedByAccount?.Email || updatedByAccount?.Username || null;
+  return {
+    CommissionDefaultID: row.RuleID,
+    FoodCategoryID: GLOBAL_RULE_LIST_FOOD_CATEGORY_ID,
+    CategoryName: 'Global (platform)',
+    RuleName: row.RuleName,
+    CommissionPercent: Number(row.CommissionPercent),
+    IsActive: row.IsActive,
+    ActivatedAt: row.ActivatedAt ? row.ActivatedAt.toISOString() : null,
+    ExpiredAt: row.ExpiredAt ? row.ExpiredAt.toISOString() : null,
+    EffectiveFrom: toDateOnlyString(row.EffectiveFrom),
+    EffectiveTo: row.EffectiveTo ? toDateOnlyString(row.EffectiveTo) : null,
+    CreatedAt: row.CreatedAt.toISOString().slice(0, 10),
+    UpdatedByLabel: updatedByLabel,
+    IsGlobal: true as const,
+  };
+}
+
+/** Sort by effective window (newest first), then created date — used within global-only or category-only blocks. */
+function compareCategoryListRows(
+  a: ReturnType<typeof mapCategoryRow> & { IsGlobal?: boolean },
+  b: ReturnType<typeof mapCategoryRow> & { IsGlobal?: boolean },
+): number {
+  const ef = b.EffectiveFrom.localeCompare(a.EffectiveFrom);
+  if (ef !== 0) return ef;
+  return b.CreatedAt.localeCompare(a.CreatedAt);
+}
+
 @Injectable()
 export class AdminCommissionFeesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) { }
 
   private async requireAdminId(accountId: string): Promise<string> {
     const admin = await this.prisma.admin.findUnique({
@@ -168,6 +161,7 @@ export class AdminCommissionFeesService {
         CommissionPercent: true,
         IsActive: true,
         ActivatedAt: true,
+        ExpiredAt: true,
         EffectiveFrom: true,
         EffectiveTo: true,
         CreatedAt: true,
@@ -177,7 +171,21 @@ export class AdminCommissionFeesService {
         },
       },
     });
-    return row ? mapGlobalRuleRow(row) : null;
+    if (!row) return null;
+    const mapped = mapGlobalRuleRow(row);
+    return {
+      DefaultID: mapped.RuleID,
+      RuleName: mapped.RuleName,
+      CommissionPercent: mapped.CommissionPercent,
+      IsActive: mapped.IsActive,
+      ActivatedAt: mapped.ActivatedAt,
+      ExpiredAt: mapped.ExpiredAt,
+      EffectiveFrom: mapped.EffectiveFrom,
+      EffectiveTo: mapped.EffectiveTo,
+      CreatedAt: mapped.CreatedAt,
+      UpdatedAt: mapped.UpdatedAt,
+      UpdatedByLabel: mapped.UpdatedByLabel,
+    };
   }
 
   async listGlobalRules() {
@@ -190,6 +198,7 @@ export class AdminCommissionFeesService {
         CommissionPercent: true,
         IsActive: true,
         ActivatedAt: true,
+        ExpiredAt: true,
         EffectiveFrom: true,
         EffectiveTo: true,
         CreatedAt: true,
@@ -199,7 +208,7 @@ export class AdminCommissionFeesService {
         },
       },
     });
-    return { items: rows.map((r) => mapGlobalRuleRow(r)) };
+    return { items: rows.map((row) => mapGlobalRuleRow(row)) };
   }
 
   async createGlobalRule(
@@ -287,7 +296,7 @@ export class AdminCommissionFeesService {
 
     const existing = await this.prisma.platformCommissionGlobalRule.findUnique({
       where: { RuleID: id },
-      select: { RuleID: true, DeletedAt: true, EffectiveFrom: true, EffectiveTo: true, ActivatedAt: true },
+      select: { RuleID: true, DeletedAt: true, EffectiveFrom: true, EffectiveTo: true, ActivatedAt: true, ExpiredAt: true },
     });
     if (!existing || existing.DeletedAt) throw new NotFoundException('Global rule not found');
 
@@ -313,7 +322,10 @@ export class AdminCommissionFeesService {
         ? parseDateOnlyRequired(body.effectiveFrom, 'effectiveFrom')
         : existing.EffectiveFrom;
     const minFrom = todayDateOnlyUtc();
-    if (mergedFrom.getTime() < minFrom.getTime()) {
+    const allowPastExistingStart =
+      mergedFrom.getTime() < minFrom.getTime() &&
+      isSameDateOnly(mergedFrom, existing.EffectiveFrom);
+    if (mergedFrom.getTime() < minFrom.getTime() && !allowPastExistingStart) {
       throw new BadRequestException('effectiveFrom cannot be in the past');
     }
     let mergedTo: Date | null =
@@ -327,15 +339,23 @@ export class AdminCommissionFeesService {
       throw new BadRequestException('effectiveTo must be on or after effectiveFrom');
     }
     data.EffectiveTo = mergedTo;
+    // If end date is extended to the future, clear ExpiredAt immediately.
+    if (mergedTo.getTime() >= Date.now()) {
+      data.ExpiredAt = null;
+    }
 
     if (body.isActive !== undefined) {
-      const b = asBoolean(body.isActive);
-      if (b === null) throw new BadRequestException('isActive must be a boolean');
+      const nextIsActive = asBoolean(body.isActive);
+      if (nextIsActive === null) throw new BadRequestException('isActive must be a boolean');
+      if (nextIsActive === true) {
+        // Keep one-active invariant: activation must go through the dedicated endpoint.
+        throw new BadRequestException('Use activate endpoint to activate a global rule');
+      }
       if (!existing.ActivatedAt) {
-        if (b === false) throw new BadRequestException('Cannot set Pending rule to Inactive');
+        if (nextIsActive === false) throw new BadRequestException('Cannot set Pending rule to Inactive');
         data.ActivatedAt = new Date();
       }
-      data.IsActive = b;
+      data.IsActive = nextIsActive;
     }
 
     // Activation is handled via explicit activate endpoint to guarantee one-active invariant.
@@ -368,9 +388,13 @@ export class AdminCommissionFeesService {
     const updated = await this.prisma.$transaction(async (tx) => {
       const row = await tx.platformCommissionGlobalRule.findUnique({
         where: { RuleID: id },
-        select: { RuleID: true, DeletedAt: true },
+        select: { RuleID: true, DeletedAt: true, ExpiredAt: true, EffectiveTo: true },
       });
       if (!row || row.DeletedAt) throw new NotFoundException('Global rule not found');
+      if (row.ExpiredAt) throw new BadRequestException('Rule is expired');
+      if (row.EffectiveTo && row.EffectiveTo.getTime() < Date.now()) {
+        throw new BadRequestException('Rule is expired');
+      }
 
       await tx.platformCommissionGlobalRule.updateMany({
         where: { DeletedAt: null, IsActive: true },
@@ -430,12 +454,17 @@ export class AdminCommissionFeesService {
     const status = params.status?.trim();
     if (status === 'Pending') {
       where.ActivatedAt = null;
+      where.ExpiredAt = null;
     } else if (status === 'Active') {
       where.ActivatedAt = { not: null };
+      where.ExpiredAt = null;
       where.IsActive = true;
     } else if (status === 'Inactive') {
       where.ActivatedAt = { not: null };
+      where.ExpiredAt = null;
       where.IsActive = false;
+    } else if (status === 'Expired') {
+      where.ExpiredAt = { not: null };
     }
 
     const filterFrom = params.effectiveFrom
@@ -455,43 +484,116 @@ export class AdminCommissionFeesService {
       where.AND = and;
     }
 
-    const q = params.search?.trim();
-    if (q) {
+    const searchQuery = params.search?.trim();
+    if (searchQuery) {
       where.OR = [
-        { RuleName: { contains: q } },
-        { foodCategory: { CategoryName: { contains: q } } },
+        { RuleName: { contains: searchQuery } },
+        { foodCategory: { CategoryName: { contains: searchQuery } } },
       ];
     }
 
-    const [total, rows] = await this.prisma.$transaction([
-      this.prisma.categoryCommissionDefault.count({ where }),
+    const globalSelect = {
+      RuleID: true,
+      RuleName: true,
+      CommissionPercent: true,
+      IsActive: true,
+      ActivatedAt: true,
+      ExpiredAt: true,
+      EffectiveFrom: true,
+      EffectiveTo: true,
+      CreatedAt: true,
+      updatedBy: {
+        select: {
+          account: { select: { Username: true, Email: true } },
+        },
+      },
+    } as const;
+
+    const categorySelect = {
+      CommissionDefaultID: true,
+      FoodCategoryID: true,
+      RuleName: true,
+      CommissionPercent: true,
+      IsActive: true,
+      ActivatedAt: true,
+      ExpiredAt: true,
+      EffectiveFrom: true,
+      EffectiveTo: true,
+      CreatedAt: true,
+      foodCategory: { select: { CategoryName: true } },
+      updatedBy: {
+        select: {
+          account: { select: { Username: true, Email: true } },
+        },
+      },
+    } as const;
+
+    const foodCategoryId = params.foodCategoryId?.trim();
+    const includeGlobalRows = !foodCategoryId;
+
+    const globalWhere: Prisma.PlatformCommissionGlobalRuleWhereInput = {
+      DeletedAt: null,
+    };
+    if (includeGlobalRows) {
+      if (params.isActive === true || params.isActive === false) {
+        globalWhere.IsActive = params.isActive;
+      }
+      if (status === 'Pending') {
+        globalWhere.ActivatedAt = null;
+        globalWhere.ExpiredAt = null;
+      } else if (status === 'Active') {
+        globalWhere.ActivatedAt = { not: null };
+        globalWhere.ExpiredAt = null;
+        globalWhere.IsActive = true;
+      } else if (status === 'Inactive') {
+        globalWhere.ActivatedAt = { not: null };
+        globalWhere.ExpiredAt = null;
+        globalWhere.IsActive = false;
+      } else if (status === 'Expired') {
+        globalWhere.ExpiredAt = { not: null };
+      }
+      if (filterFrom || filterTo) {
+        const andG: Prisma.PlatformCommissionGlobalRuleWhereInput[] = [];
+        if (filterFrom) {
+          andG.push({ EffectiveFrom: { gte: filterFrom } });
+        }
+        if (filterTo) {
+          andG.push({ EffectiveFrom: { lte: filterTo } });
+        }
+        globalWhere.AND = andG;
+      }
+      if (searchQuery) {
+        globalWhere.RuleName = { contains: searchQuery };
+      }
+    }
+
+    const [globalRows, categoryRows] = await Promise.all([
+      includeGlobalRows
+        ? this.prisma.platformCommissionGlobalRule.findMany({
+          where: globalWhere,
+          orderBy: [{ EffectiveFrom: 'desc' }, { CreatedAt: 'desc' }],
+          select: globalSelect,
+        })
+        : Promise.resolve([]),
       this.prisma.categoryCommissionDefault.findMany({
         where,
         orderBy: [{ EffectiveFrom: 'desc' }, { CreatedAt: 'desc' }],
-        skip,
-        take: pageSize,
-        select: {
-          CommissionDefaultID: true,
-          FoodCategoryID: true,
-          RuleName: true,
-          CommissionPercent: true,
-          IsActive: true,
-          ActivatedAt: true,
-          EffectiveFrom: true,
-          EffectiveTo: true,
-          CreatedAt: true,
-          foodCategory: { select: { CategoryName: true } },
-          updatedBy: {
-            select: {
-              account: { select: { Username: true, Email: true } },
-            },
-          },
-        },
+        select: categorySelect,
       }),
     ]);
 
+    const globalItems = globalRows.map((row) => mapGlobalRuleToCategoryListRow(row));
+    const categoryItems = categoryRows.map((row) => mapCategoryRow(row));
+    // Global rows always precede category rows in the list (and pagination).
+    const merged = [
+      ...globalItems.sort(compareCategoryListRows),
+      ...categoryItems.sort(compareCategoryListRows),
+    ];
+    const total = merged.length;
+    const items = merged.slice(skip, skip + pageSize);
+
     return {
-      items: rows.map((r) => mapCategoryRow(r)),
+      items,
       total,
       page,
       pageSize,
@@ -511,6 +613,7 @@ export class AdminCommissionFeesService {
         CommissionPercent: true,
         IsActive: true,
         ActivatedAt: true,
+        ExpiredAt: true,
         EffectiveFrom: true,
         EffectiveTo: true,
         CreatedAt: true,
@@ -571,49 +674,38 @@ export class AdminCommissionFeesService {
     // Always create as Pending; activation is manual or via cronjob.
     const activeFlag = false;
 
-    try {
-      const created = await this.prisma.categoryCommissionDefault.create({
-        data: {
-          foodCategory: { connect: { CategoryID: foodCategoryId } },
-          updatedBy: { connect: { AdminID: adminId } },
-          RuleName: ruleName,
-          CommissionPercent: new Prisma.Decimal(pct),
-          IsActive: activeFlag,
-          ActivatedAt: null,
-          EffectiveFrom: effectiveFrom,
-          EffectiveTo: effectiveTo,
-          DeletedAt: null,
-        },
-        select: {
-          CommissionDefaultID: true,
-          FoodCategoryID: true,
-          RuleName: true,
-          CommissionPercent: true,
-          IsActive: true,
-          ActivatedAt: true,
-          EffectiveFrom: true,
-          EffectiveTo: true,
-          CreatedAt: true,
-          foodCategory: { select: { CategoryName: true } },
-          updatedBy: {
-            select: {
-              account: { select: { Username: true, Email: true } },
-            },
+    const created = await this.prisma.categoryCommissionDefault.create({
+      data: {
+        foodCategory: { connect: { CategoryID: foodCategoryId } },
+        updatedBy: { connect: { AdminID: adminId } },
+        RuleName: ruleName,
+        CommissionPercent: new Prisma.Decimal(pct),
+        IsActive: activeFlag,
+        ActivatedAt: null,
+        EffectiveFrom: effectiveFrom,
+        EffectiveTo: effectiveTo,
+        DeletedAt: null,
+      },
+      select: {
+        CommissionDefaultID: true,
+        FoodCategoryID: true,
+        RuleName: true,
+        CommissionPercent: true,
+        IsActive: true,
+        ActivatedAt: true,
+        ExpiredAt: true,
+        EffectiveFrom: true,
+        EffectiveTo: true,
+        CreatedAt: true,
+        foodCategory: { select: { CategoryName: true } },
+        updatedBy: {
+          select: {
+            account: { select: { Username: true, Email: true } },
           },
         },
-      });
-      return { success: true as const, item: mapCategoryRow(created) };
-    } catch (e) {
-      if (
-        e instanceof Prisma.PrismaClientKnownRequestError &&
-        e.code === 'P2002'
-      ) {
-        throw new ConflictException(
-          'A rule with this category and effective start already exists',
-        );
-      }
-      throw e;
-    }
+      },
+    });
+    return { success: true as const, item: mapCategoryRow(created) };
   }
 
   async updateCategoryRule(
@@ -637,9 +729,11 @@ export class AdminCommissionFeesService {
       select: {
         CommissionDefaultID: true,
         FoodCategoryID: true,
+        IsActive: true,
         EffectiveFrom: true,
         EffectiveTo: true,
         ActivatedAt: true,
+        ExpiredAt: true,
         DeletedAt: true,
       },
     });
@@ -672,28 +766,44 @@ export class AdminCommissionFeesService {
     }
 
     if (body.isActive !== undefined) {
-      const b = asBoolean(body.isActive);
-      if (b === null) {
+      const nextIsActive = asBoolean(body.isActive);
+      if (nextIsActive === null) {
         throw new BadRequestException('isActive must be a boolean');
       }
+      if (nextIsActive === true) {
+        if (existing.ExpiredAt) throw new BadRequestException('Rule is expired');
+        if (existing.EffectiveTo && existing.EffectiveTo.getTime() < Date.now()) {
+          throw new BadRequestException('Rule is expired');
+        }
+      }
       if (!existing.ActivatedAt) {
-        if (b === false) {
+        if (nextIsActive === false) {
           throw new BadRequestException('Cannot set Pending rule to Inactive');
         }
         data.ActivatedAt = new Date();
       }
-      data.IsActive = b;
+      data.IsActive = nextIsActive;
     }
 
     let mergedEffectiveFrom = existing.EffectiveFrom;
     if (body.effectiveFrom !== undefined) {
-      const d = parseDateOnlyRequired(body.effectiveFrom, 'effectiveFrom');
-      data.EffectiveFrom = d;
-      mergedEffectiveFrom = d;
+      const nextEffectiveFrom = parseDateOnlyRequired(body.effectiveFrom, 'effectiveFrom');
+      data.EffectiveFrom = nextEffectiveFrom;
+      mergedEffectiveFrom = nextEffectiveFrom;
+    }
+    // If admin moves EffectiveFrom to the future, treat it as Pending again,
+    // unless they explicitly requested activation via `isActive=true`.
+    const isActiveExplicitlySet = body.isActive !== undefined;
+    if (mergedEffectiveFrom.getTime() > Date.now() && !isActiveExplicitlySet) {
+      data.IsActive = false;
+      data.ActivatedAt = null;
     }
 
     const minFrom = todayDateOnlyUtc();
-    if (mergedEffectiveFrom.getTime() < minFrom.getTime()) {
+    const allowPastExistingStart =
+      mergedEffectiveFrom.getTime() < minFrom.getTime() &&
+      isSameDateOnly(mergedEffectiveFrom, existing.EffectiveFrom);
+    if (mergedEffectiveFrom.getTime() < minFrom.getTime() && !allowPastExistingStart) {
       throw new BadRequestException('effectiveFrom cannot be in the past');
     }
 
@@ -712,24 +822,37 @@ export class AdminCommissionFeesService {
       throw new BadRequestException('effectiveTo must be on or after effectiveFrom');
     }
     data.EffectiveTo = mergedEffectiveTo;
-
-    const dup = await this.prisma.categoryCommissionDefault.findFirst({
-      where: {
-        FoodCategoryID: mergedFoodCategoryId,
-        EffectiveFrom: mergedEffectiveFrom,
-        DeletedAt: null,
-        NOT: { CommissionDefaultID: rid },
-      },
-      select: { CommissionDefaultID: true },
-    });
-    if (dup) {
-      throw new ConflictException(
-        'A rule with this category and effective start already exists',
-      );
+    // If end date is extended to the future, clear ExpiredAt immediately.
+    if (mergedEffectiveTo.getTime() >= Date.now()) {
+      data.ExpiredAt = null;
+      // If this rule was previously activated (not Pending) and is currently within the effective window,
+      // reactivate it automatically when it becomes un-expired.
+      const isActiveExplicitlySet = body.isActive !== undefined;
+      if (
+        !isActiveExplicitlySet &&
+        existing.ActivatedAt &&
+        mergedEffectiveFrom.getTime() <= Date.now() &&
+        mergedEffectiveFrom.getTime() <= mergedEffectiveTo.getTime()
+      ) {
+        data.IsActive = true;
+      }
     }
 
-    try {
-      const updated = await this.prisma.categoryCommissionDefault.update({
+    const updated = await this.prisma.$transaction(async (tx) => {
+      if (data.IsActive === true) {
+        await tx.categoryCommissionDefault.updateMany({
+          where: {
+            DeletedAt: null,
+            ExpiredAt: null,
+            FoodCategoryID: mergedFoodCategoryId,
+            IsActive: true,
+            NOT: { CommissionDefaultID: rid },
+          },
+          data: { IsActive: false },
+        });
+      }
+
+      return tx.categoryCommissionDefault.update({
         where: { CommissionDefaultID: rid },
         data,
         select: {
@@ -739,6 +862,7 @@ export class AdminCommissionFeesService {
           CommissionPercent: true,
           IsActive: true,
           ActivatedAt: true,
+          ExpiredAt: true,
           EffectiveFrom: true,
           EffectiveTo: true,
           CreatedAt: true,
@@ -750,18 +874,9 @@ export class AdminCommissionFeesService {
           },
         },
       });
-      return { success: true as const, item: mapCategoryRow(updated) };
-    } catch (e) {
-      if (
-        e instanceof Prisma.PrismaClientKnownRequestError &&
-        e.code === 'P2002'
-      ) {
-        throw new ConflictException(
-          'A rule with this category and effective start already exists',
-        );
-      }
-      throw e;
-    }
+    });
+
+    return { success: true as const, item: mapCategoryRow(updated) };
   }
 
   parseListQuery(input: {

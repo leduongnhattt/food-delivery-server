@@ -1,6 +1,5 @@
 import {
   BadRequestException,
-  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -8,109 +7,57 @@ import { PaymentMethod, Prisma } from '@prisma/client';
 import { PrismaService } from '@infra/prisma/prisma.service';
 import { asBoolean, asTrimmedString } from '@common/utils/parse.utils';
 import {
+  addDaysUtc,
+  isSameDateOnly,
+  parseDateOnlyEnd,
+  parseDateOnlyRequired,
+  parseDateOnlyStart,
+  parsePercentRequired,
+  todayDateOnlyUtc,
+  toDateOnlyString,
+} from '@common/utils/finance-rule.utils';
+import {
   parseChannelFilterToken,
   parseUiPaymentChannelToDb,
   paymentChannelLabel,
   type TransactionFeeChannelFilterToken,
-} from './transaction-fee-channel.utils';
+} from '@modules/admin/admin-transaction-fees/transaction-fee-channel.utils';
 
-function mapGlobalRuleRow(r: {
+function mapGlobalRuleRow(row: {
   RuleID: string;
   RuleName: string | null;
   RatePercent: Prisma.Decimal;
   IsActive: boolean;
   ActivatedAt: Date | null;
+  ExpiredAt?: Date | null;
   EffectiveFrom: Date;
   EffectiveTo: Date | null;
   CreatedAt: Date;
   UpdatedAt: Date | null;
   updatedBy: { account: { Username: string; Email: string } | null } | null;
 }) {
-  const u = r.updatedBy?.account;
+  const updatedByAccount = row.updatedBy?.account;
   return {
-    RuleID: r.RuleID,
-    RuleName: r.RuleName,
-    RatePercent: Number(r.RatePercent),
-    IsActive: r.IsActive,
-    ActivatedAt: r.ActivatedAt ? r.ActivatedAt.toISOString() : null,
-    EffectiveFrom: toDateOnlyString(r.EffectiveFrom),
-    EffectiveTo: r.EffectiveTo ? toDateOnlyString(r.EffectiveTo) : null,
-    CreatedAt: r.CreatedAt.toISOString(),
-    UpdatedAt: r.UpdatedAt?.toISOString() ?? null,
-    UpdatedByLabel: u?.Email || u?.Username || null,
+    RuleID: row.RuleID,
+    RuleName: row.RuleName,
+    RatePercent: Number(row.RatePercent),
+    IsActive: row.IsActive,
+    ActivatedAt: row.ActivatedAt ? row.ActivatedAt.toISOString() : null,
+    ExpiredAt: row.ExpiredAt ? row.ExpiredAt.toISOString() : null,
+    EffectiveFrom: toDateOnlyString(row.EffectiveFrom),
+    EffectiveTo: row.EffectiveTo ? toDateOnlyString(row.EffectiveTo) : null,
+    CreatedAt: row.CreatedAt.toISOString(),
+    UpdatedAt: row.UpdatedAt?.toISOString() ?? null,
+    UpdatedByLabel:
+      updatedByAccount?.Email || updatedByAccount?.Username || null,
   };
 }
 
 function parseRatePercent(value: unknown): number {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    if (value < 0 || value > 100) {
-      throw new BadRequestException('ratePercent must be between 0 and 100');
-    }
-    return Math.round(value * 100) / 100;
-  }
-  if (typeof value === 'string' && value.trim()) {
-    const n = Number(value.trim().replace(',', '.'));
-    if (!Number.isFinite(n) || n < 0 || n > 100) {
-      throw new BadRequestException('ratePercent must be between 0 and 100');
-    }
-    return Math.round(n * 100) / 100;
-  }
-  throw new BadRequestException('ratePercent is required');
-}
-
-function parseDateOnlyStart(value: unknown): Date | null {
-  const s = asTrimmedString(value);
-  if (!s) return null;
-  const d = new Date(`${s}T00:00:00.000Z`);
-  if (Number.isNaN(d.getTime())) {
-    throw new BadRequestException('Invalid date value');
-  }
-  return d;
-}
-
-function parseDateOnlyEnd(value: unknown): Date | null {
-  const s = asTrimmedString(value);
-  if (!s) return null;
-  const d = new Date(`${s}T23:59:59.999Z`);
-  if (Number.isNaN(d.getTime())) {
-    throw new BadRequestException('Invalid date value');
-  }
-  return d;
-}
-
-function parseDateOnlyRequired(value: unknown, field: string): Date {
-  const s = asTrimmedString(value);
-  if (!s) throw new BadRequestException(`${field} is required`);
-  const d = new Date(`${s}T00:00:00.000Z`);
-  if (Number.isNaN(d.getTime())) {
-    throw new BadRequestException(`Invalid ${field}`);
-  }
-  return d;
-}
-
-function parseOptionalDateTime(value: unknown): Date | null {
-  const s = asTrimmedString(value);
-  if (!s) return null;
-  const d = new Date(s);
-  if (Number.isNaN(d.getTime())) {
-    throw new BadRequestException('Invalid date value');
-  }
-  return d;
-}
-
-function todayDateOnlyUtc(): Date {
-  const t = new Date();
-  return new Date(`${t.toISOString().slice(0, 10)}T00:00:00.000Z`);
-}
-
-function addDaysUtc(d: Date, days: number): Date {
-  const out = new Date(d);
-  out.setUTCDate(out.getUTCDate() + days);
-  return out;
-}
-
-function toDateOnlyString(d: Date): string {
-  return d.toISOString().slice(0, 10);
+  return parsePercentRequired(value, {
+    requiredMessage: 'ratePercent is required',
+    outOfRangeMessage: 'ratePercent must be between 0 and 100',
+  });
 }
 
 function channelRuleWhereForFilter(
@@ -135,7 +82,7 @@ function channelRuleWhereForFilter(
   };
 }
 
-function mapFeeRow(r: {
+function mapFeeRow(row: {
   FeeID: string;
   FeeName: string;
   PaymentMethod: PaymentMethod;
@@ -143,6 +90,7 @@ function mapFeeRow(r: {
   RatePercent: Prisma.Decimal;
   IsActive: boolean;
   ActivatedAt: Date | null;
+  ExpiredAt?: Date | null;
   EffectiveFrom: Date;
   EffectiveTo: Date | null;
   CreatedAt: Date;
@@ -150,29 +98,91 @@ function mapFeeRow(r: {
     account: { Username: string; Email: string } | null;
   } | null;
 }) {
-  const u = r.updatedBy?.account;
+  const updatedByAccount = row.updatedBy?.account;
   return {
-    FeeID: r.FeeID,
-    FeeName: r.FeeName,
-    PaymentMethod: r.PaymentMethod,
-    PaymentProviderCode: r.PaymentProviderCode,
+    FeeID: row.FeeID,
+    FeeName: row.FeeName,
+    PaymentMethod: row.PaymentMethod,
+    PaymentProviderCode: row.PaymentProviderCode,
     PaymentChannelLabel: paymentChannelLabel(
-      r.PaymentMethod,
-      r.PaymentProviderCode,
+      row.PaymentMethod,
+      row.PaymentProviderCode,
     ),
-    RatePercent: Number(r.RatePercent),
-    IsActive: r.IsActive,
-    ActivatedAt: r.ActivatedAt ? r.ActivatedAt.toISOString() : null,
-    EffectiveFrom: toDateOnlyString(r.EffectiveFrom),
-    EffectiveTo: r.EffectiveTo ? toDateOnlyString(r.EffectiveTo) : null,
-    CreatedAt: r.CreatedAt.toISOString().slice(0, 10),
-    UpdatedByLabel: u?.Email || u?.Username || null,
+    RatePercent: Number(row.RatePercent),
+    IsActive: row.IsActive,
+    ActivatedAt: row.ActivatedAt ? row.ActivatedAt.toISOString() : null,
+    ExpiredAt: row.ExpiredAt ? row.ExpiredAt.toISOString() : null,
+    EffectiveFrom: toDateOnlyString(row.EffectiveFrom),
+    EffectiveTo: row.EffectiveTo ? toDateOnlyString(row.EffectiveTo) : null,
+    CreatedAt: row.CreatedAt.toISOString().slice(0, 10),
+    UpdatedByLabel:
+      updatedByAccount?.Email || updatedByAccount?.Username || null,
   };
+}
+
+function normalizeProviderCode(providerCode: string | null): string | null {
+  if (providerCode == null) return null;
+  const trimmed = providerCode.trim();
+  return trimmed ? trimmed.toLowerCase() : null;
+}
+
+function requireTrimmedString(value: unknown, errorMessage: string): string {
+  const s = asTrimmedString(value);
+  if (!s) throw new BadRequestException(errorMessage);
+  return s;
+}
+
+/** Sentinel channel identity for global rows merged into channel-rules list (not a real channel). */
+const GLOBAL_RULE_LIST_PAYMENT_METHOD = 'Global' as const;
+const GLOBAL_RULE_LIST_PAYMENT_PROVIDER_CODE = null;
+
+function mapGlobalRuleToChannelListRow(row: {
+  RuleID: string;
+  RuleName: string | null;
+  RatePercent: Prisma.Decimal;
+  IsActive: boolean;
+  ActivatedAt: Date | null;
+  ExpiredAt?: Date | null;
+  EffectiveFrom: Date;
+  EffectiveTo: Date | null;
+  CreatedAt: Date;
+  updatedBy: {
+    account: { Username: string; Email: string } | null;
+  } | null;
+}) {
+  const updatedByAccount = row.updatedBy?.account;
+  return {
+    FeeID: row.RuleID,
+    FeeName: row.RuleName?.trim() ? row.RuleName : 'Global Transaction Fee Rule',
+    PaymentMethod: GLOBAL_RULE_LIST_PAYMENT_METHOD,
+    PaymentProviderCode: GLOBAL_RULE_LIST_PAYMENT_PROVIDER_CODE,
+    PaymentChannelLabel: 'Global (platform)',
+    RatePercent: Number(row.RatePercent),
+    IsActive: row.IsActive,
+    ActivatedAt: row.ActivatedAt ? row.ActivatedAt.toISOString() : null,
+    ExpiredAt: row.ExpiredAt ? row.ExpiredAt.toISOString() : null,
+    EffectiveFrom: toDateOnlyString(row.EffectiveFrom),
+    EffectiveTo: row.EffectiveTo ? toDateOnlyString(row.EffectiveTo) : null,
+    CreatedAt: row.CreatedAt.toISOString().slice(0, 10),
+    UpdatedByLabel:
+      updatedByAccount?.Email || updatedByAccount?.Username || null,
+    IsGlobal: true as const,
+  };
+}
+
+/** Sort by effective window (newest first), then created date — used within global-only or channel-only blocks. */
+function compareChannelListRows(
+  a: { EffectiveFrom: string; CreatedAt: string },
+  b: { EffectiveFrom: string; CreatedAt: string },
+): number {
+  const ef = b.EffectiveFrom.localeCompare(a.EffectiveFrom);
+  if (ef !== 0) return ef;
+  return b.CreatedAt.localeCompare(a.CreatedAt);
 }
 
 @Injectable()
 export class AdminTransactionFeesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) { }
 
   private async requireAdminId(accountId: string): Promise<string> {
     const admin = await this.prisma.admin.findUnique({
@@ -185,6 +195,152 @@ export class AdminTransactionFeesService {
     return admin.AdminID;
   }
 
+  private mergeChannelPatch(
+    existing: {
+      PaymentMethod: PaymentMethod;
+      PaymentProviderCode: string | null;
+    },
+    body: { paymentChannel?: unknown },
+    data: Prisma.TransactionFeeRuleUpdateInput,
+  ): { mergedMethod: PaymentMethod; mergedProvider: string | null } {
+    let mergedMethod = existing.PaymentMethod;
+    let mergedProvider = normalizeProviderCode(existing.PaymentProviderCode);
+
+    if (body.paymentChannel === undefined) {
+      return { mergedMethod, mergedProvider };
+    }
+
+    const paymentChannelInput = requireTrimmedString(
+      body.paymentChannel,
+      'paymentChannel is invalid',
+    );
+    const mappedChannel = parseUiPaymentChannelToDb(paymentChannelInput);
+    mergedMethod = mappedChannel.method;
+    mergedProvider = normalizeProviderCode(mappedChannel.providerCode);
+    data.PaymentMethod = mergedMethod;
+    data.PaymentProviderCode = mergedProvider;
+    return { mergedMethod, mergedProvider };
+  }
+
+  private mergeFeeNamePatch(
+    body: { feeName?: unknown },
+    data: Prisma.TransactionFeeRuleUpdateInput,
+  ): void {
+    if (body.feeName === undefined) return;
+    const feeName = requireTrimmedString(body.feeName, 'feeName is invalid');
+    data.FeeName = feeName;
+  }
+
+  private mergeRatePercentPatch(
+    body: { ratePercent?: unknown },
+    data: Prisma.TransactionFeeRuleUpdateInput,
+  ): void {
+    if (body.ratePercent === undefined) return;
+    data.RatePercent = new Prisma.Decimal(parseRatePercent(body.ratePercent));
+  }
+
+  private mergeActivationPatch(
+    existing: { ActivatedAt: Date | null; ExpiredAt: Date | null; EffectiveTo: Date | null },
+    body: { isActive?: unknown },
+    data: Prisma.TransactionFeeRuleUpdateInput,
+  ): void {
+    if (body.isActive === undefined) return;
+    const nextIsActive = asBoolean(body.isActive);
+    if (nextIsActive === null) throw new BadRequestException('isActive must be a boolean');
+    if (nextIsActive === true) {
+      if (existing.ExpiredAt) throw new BadRequestException('Rule is expired');
+      if (existing.EffectiveTo && existing.EffectiveTo.getTime() < Date.now()) {
+        throw new BadRequestException('Rule is expired');
+      }
+    }
+    if (!existing.ActivatedAt) {
+      if (nextIsActive === false) {
+        throw new BadRequestException('Cannot set Pending rule to Inactive');
+      }
+      data.ActivatedAt = new Date();
+    }
+    data.IsActive = nextIsActive;
+  }
+
+  private mergeEffectiveWindowPatch(
+    existing: { EffectiveFrom: Date; EffectiveTo: Date | null; ActivatedAt: Date | null },
+    body: { effectiveFrom?: unknown; effectiveTo?: unknown; isActive?: unknown },
+    data: Prisma.TransactionFeeRuleUpdateInput,
+  ): { mergedEffectiveFrom: Date; mergedEffectiveTo: Date } {
+    let mergedEffectiveFrom = existing.EffectiveFrom;
+    if (body.effectiveFrom !== undefined) {
+      const nextEffectiveFrom = parseDateOnlyRequired(body.effectiveFrom, 'effectiveFrom');
+      data.EffectiveFrom = nextEffectiveFrom;
+      mergedEffectiveFrom = nextEffectiveFrom;
+    }
+
+    // If admin moves EffectiveFrom to the future, treat it as Pending again.
+    const isActiveExplicitlySet = body.isActive !== undefined;
+    if (mergedEffectiveFrom.getTime() > Date.now() && !isActiveExplicitlySet) {
+      data.IsActive = false;
+      data.ActivatedAt = null;
+    }
+
+    const minFrom = todayDateOnlyUtc();
+    const allowPastExistingStart =
+      mergedEffectiveFrom.getTime() < minFrom.getTime() &&
+      isSameDateOnly(mergedEffectiveFrom, existing.EffectiveFrom);
+    if (mergedEffectiveFrom.getTime() < minFrom.getTime() && !allowPastExistingStart) {
+      throw new BadRequestException('effectiveFrom cannot be in the past');
+    }
+
+    let mergedEffectiveTo: Date | null = existing.EffectiveTo;
+    if (body.effectiveTo !== undefined) {
+      const effectiveToRaw = body.effectiveTo;
+      mergedEffectiveTo =
+        effectiveToRaw === null || effectiveToRaw === ''
+          ? null
+          : parseDateOnlyRequired(effectiveToRaw, 'effectiveTo');
+    }
+    if (!mergedEffectiveTo) mergedEffectiveTo = addDaysUtc(mergedEffectiveFrom, 1);
+    if (mergedEffectiveTo.getTime() < mergedEffectiveFrom.getTime()) {
+      throw new BadRequestException('effectiveTo must be on or after effectiveFrom');
+    }
+    data.EffectiveTo = mergedEffectiveTo;
+
+    if (mergedEffectiveTo.getTime() >= Date.now()) {
+      data.ExpiredAt = null;
+      // If this rule was previously activated (not Pending) and is currently within the effective window,
+      // reactivate it automatically when it becomes un-expired.
+      if (
+        !isActiveExplicitlySet &&
+        existing.ActivatedAt &&
+        mergedEffectiveFrom.getTime() <= Date.now() &&
+        mergedEffectiveFrom.getTime() <= mergedEffectiveTo.getTime()
+      ) {
+        data.IsActive = true;
+      }
+    }
+
+    return { mergedEffectiveFrom, mergedEffectiveTo };
+  }
+
+  private async deactivateOtherActiveRulesInChannel(
+    tx: Prisma.TransactionClient,
+    args: {
+      feeId: string;
+      mergedMethod: PaymentMethod;
+      mergedProvider: string | null;
+    },
+  ): Promise<void> {
+    await tx.transactionFeeRule.updateMany({
+      where: {
+        DeletedAt: null,
+        ExpiredAt: null,
+        PaymentMethod: args.mergedMethod,
+        PaymentProviderCode: args.mergedProvider,
+        IsActive: true,
+        NOT: { FeeID: args.feeId },
+      },
+      data: { IsActive: false },
+    });
+  }
+
   async getActiveGlobalRule() {
     const row = await this.prisma.transactionFeeGlobalRule.findFirst({
       where: { DeletedAt: null, IsActive: true },
@@ -195,6 +351,7 @@ export class AdminTransactionFeesService {
         RatePercent: true,
         IsActive: true,
         ActivatedAt: true,
+        ExpiredAt: true,
         EffectiveFrom: true,
         EffectiveTo: true,
         CreatedAt: true,
@@ -204,7 +361,22 @@ export class AdminTransactionFeesService {
         },
       },
     });
-    return row ? mapGlobalRuleRow(row) : null;
+    if (!row) return null;
+    const mapped = mapGlobalRuleRow(row);
+    // API contract: `/admin/finance/transaction-fees/global` returns `DefaultID` for the active row.
+    return {
+      DefaultID: mapped.RuleID,
+      RuleName: mapped.RuleName,
+      RatePercent: mapped.RatePercent,
+      IsActive: mapped.IsActive,
+      ActivatedAt: mapped.ActivatedAt,
+      ExpiredAt: mapped.ExpiredAt,
+      EffectiveFrom: mapped.EffectiveFrom,
+      EffectiveTo: mapped.EffectiveTo,
+      CreatedAt: mapped.CreatedAt,
+      UpdatedAt: mapped.UpdatedAt,
+      UpdatedByLabel: mapped.UpdatedByLabel,
+    };
   }
 
   async listGlobalRules() {
@@ -217,6 +389,7 @@ export class AdminTransactionFeesService {
         RatePercent: true,
         IsActive: true,
         ActivatedAt: true,
+        ExpiredAt: true,
         EffectiveFrom: true,
         EffectiveTo: true,
         CreatedAt: true,
@@ -226,7 +399,7 @@ export class AdminTransactionFeesService {
         },
       },
     });
-    return { items: rows.map((r) => mapGlobalRuleRow(r)) };
+    return { items: rows.map((row) => mapGlobalRuleRow(row)) };
   }
 
   async createGlobalRule(
@@ -267,7 +440,6 @@ export class AdminTransactionFeesService {
         data: {
           RuleName: ruleName,
           RatePercent: new Prisma.Decimal(rate),
-          // Always create as Pending; activation is manual or via cronjob.
           IsActive: false,
           ActivatedAt: null,
           EffectiveFrom: effectiveFrom,
@@ -313,7 +485,7 @@ export class AdminTransactionFeesService {
 
     const existing = await this.prisma.transactionFeeGlobalRule.findUnique({
       where: { RuleID: id },
-      select: { RuleID: true, DeletedAt: true, EffectiveFrom: true, EffectiveTo: true, ActivatedAt: true },
+      select: { RuleID: true, DeletedAt: true, EffectiveFrom: true, EffectiveTo: true, ActivatedAt: true, ExpiredAt: true },
     });
     if (!existing || existing.DeletedAt) throw new NotFoundException('Global rule not found');
 
@@ -342,7 +514,10 @@ export class AdminTransactionFeesService {
         ? parseDateOnlyRequired(body.effectiveFrom, 'effectiveFrom')
         : existing.EffectiveFrom;
     const minFrom = todayDateOnlyUtc();
-    if (mergedFrom.getTime() < minFrom.getTime()) {
+    const allowPastExistingStart =
+      mergedFrom.getTime() < minFrom.getTime() &&
+      isSameDateOnly(mergedFrom, existing.EffectiveFrom);
+    if (mergedFrom.getTime() < minFrom.getTime() && !allowPastExistingStart) {
       throw new BadRequestException('effectiveFrom cannot be in the past');
     }
     let mergedTo: Date | null =
@@ -356,15 +531,22 @@ export class AdminTransactionFeesService {
       throw new BadRequestException('effectiveTo must be on or after effectiveFrom');
     }
     data.EffectiveTo = mergedTo;
+    if (mergedTo.getTime() >= Date.now()) {
+      data.ExpiredAt = null;
+    }
 
     if (body.isActive !== undefined) {
-      const b = asBoolean(body.isActive);
-      if (b === null) throw new BadRequestException('isActive must be a boolean');
+      const nextIsActive = asBoolean(body.isActive);
+      if (nextIsActive === null) throw new BadRequestException('isActive must be a boolean');
+      if (nextIsActive === true) {
+        // Keep one-active invariant: activation must go through the dedicated endpoint.
+        throw new BadRequestException('Use activate endpoint to activate a global rule');
+      }
       if (!existing.ActivatedAt) {
-        if (b === false) throw new BadRequestException('Cannot set Pending rule to Inactive');
+        if (nextIsActive === false) throw new BadRequestException('Cannot set Pending rule to Inactive');
         data.ActivatedAt = new Date();
       }
-      data.IsActive = b;
+      data.IsActive = nextIsActive;
     }
 
     const updated = await this.prisma.transactionFeeGlobalRule.update({
@@ -396,9 +578,13 @@ export class AdminTransactionFeesService {
     const updated = await this.prisma.$transaction(async (tx) => {
       const row = await tx.transactionFeeGlobalRule.findUnique({
         where: { RuleID: id },
-        select: { RuleID: true, DeletedAt: true },
+        select: { RuleID: true, DeletedAt: true, ExpiredAt: true, EffectiveTo: true },
       });
       if (!row || row.DeletedAt) throw new NotFoundException('Global rule not found');
+      if (row.ExpiredAt) throw new BadRequestException('Rule is expired');
+      if (row.EffectiveTo && row.EffectiveTo.getTime() < Date.now()) {
+        throw new BadRequestException('Rule is expired');
+      }
 
       await tx.transactionFeeGlobalRule.updateMany({
         where: { DeletedAt: null, IsActive: true },
@@ -459,12 +645,17 @@ export class AdminTransactionFeesService {
     const status = params.status?.trim();
     if (status === 'Pending') {
       where.ActivatedAt = null;
+      where.ExpiredAt = null;
     } else if (status === 'Active') {
       where.ActivatedAt = { not: null };
+      where.ExpiredAt = null;
       where.IsActive = true;
     } else if (status === 'Inactive') {
       where.ActivatedAt = { not: null };
+      where.ExpiredAt = null;
       where.IsActive = false;
+    } else if (status === 'Expired') {
+      where.ExpiredAt = { not: null };
     }
 
     const filterFrom = params.effectiveFrom
@@ -480,18 +671,71 @@ export class AdminTransactionFeesService {
       where.AND = and;
     }
 
-    const q = params.search?.trim();
-    if (q) {
-      where.OR = [{ FeeName: { contains: q } }];
+    const searchQuery = params.search?.trim();
+    if (searchQuery) {
+      where.OR = [{ FeeName: { contains: searchQuery } }];
     }
 
-    const [total, rows] = await this.prisma.$transaction([
-      this.prisma.transactionFeeRule.count({ where }),
+    const includeGlobalRows = !(params.paymentChannel?.trim());
+
+    const globalWhere: Prisma.TransactionFeeGlobalRuleWhereInput = {
+      DeletedAt: null,
+    };
+    if (includeGlobalRows) {
+      if (params.isActive === true || params.isActive === false) {
+        globalWhere.IsActive = params.isActive;
+      }
+      if (status === 'Pending') {
+        globalWhere.ActivatedAt = null;
+        globalWhere.ExpiredAt = null;
+      } else if (status === 'Active') {
+        globalWhere.ActivatedAt = { not: null };
+        globalWhere.ExpiredAt = null;
+        globalWhere.IsActive = true;
+      } else if (status === 'Inactive') {
+        globalWhere.ActivatedAt = { not: null };
+        globalWhere.ExpiredAt = null;
+        globalWhere.IsActive = false;
+      } else if (status === 'Expired') {
+        globalWhere.ExpiredAt = { not: null };
+      }
+      if (filterFrom || filterTo) {
+        const andG: Prisma.TransactionFeeGlobalRuleWhereInput[] = [];
+        if (filterFrom) andG.push({ EffectiveFrom: { gte: filterFrom } });
+        if (filterTo) andG.push({ EffectiveFrom: { lte: filterTo } });
+        globalWhere.AND = andG;
+      }
+      if (searchQuery) {
+        globalWhere.RuleName = { contains: searchQuery };
+      }
+    }
+
+    const [globalRows, channelRows] = await Promise.all([
+      includeGlobalRows
+        ? this.prisma.transactionFeeGlobalRule.findMany({
+          where: globalWhere,
+          orderBy: [{ EffectiveFrom: 'desc' }, { CreatedAt: 'desc' }],
+          select: {
+            RuleID: true,
+            RuleName: true,
+            RatePercent: true,
+            IsActive: true,
+            ActivatedAt: true,
+            ExpiredAt: true,
+            EffectiveFrom: true,
+            EffectiveTo: true,
+            CreatedAt: true,
+            updatedBy: {
+              select: {
+                account: { select: { Username: true, Email: true } },
+              },
+            },
+          },
+        })
+        : Promise.resolve([]),
       this.prisma.transactionFeeRule.findMany({
         where,
         orderBy: [{ EffectiveFrom: 'desc' }, { CreatedAt: 'desc' }],
-        skip,
-        take: pageSize,
         select: {
           FeeID: true,
           FeeName: true,
@@ -500,6 +744,7 @@ export class AdminTransactionFeesService {
           RatePercent: true,
           IsActive: true,
           ActivatedAt: true,
+          ExpiredAt: true,
           EffectiveFrom: true,
           EffectiveTo: true,
           CreatedAt: true,
@@ -512,8 +757,18 @@ export class AdminTransactionFeesService {
       }),
     ]);
 
+    const globalItems = globalRows.map((row) => mapGlobalRuleToChannelListRow(row));
+    const channelItems = channelRows.map((row) => mapFeeRow(row));
+    // Global rows always precede channel rows in the list (and pagination).
+    const merged = [
+      ...globalItems.sort(compareChannelListRows),
+      ...channelItems.sort(compareChannelListRows),
+    ];
+    const total = merged.length;
+    const items = merged.slice(skip, skip + pageSize);
+
     return {
-      items: rows.map((r) => mapFeeRow(r)),
+      items,
       total,
       page,
       pageSize,
@@ -534,6 +789,7 @@ export class AdminTransactionFeesService {
         RatePercent: true,
         IsActive: true,
         ActivatedAt: true,
+        ExpiredAt: true,
         EffectiveFrom: true,
         EffectiveTo: true,
         CreatedAt: true,
@@ -597,76 +853,40 @@ export class AdminTransactionFeesService {
         ? null
         : providerCode.trim().toLowerCase();
 
-    await this.assertNoDuplicateRule(method, normalizedProvider, effectiveFrom);
-
-    try {
-      const created = await this.prisma.transactionFeeRule.create({
-        data: {
-          FeeName: feeName,
-          PaymentMethod: method,
-          PaymentProviderCode: normalizedProvider,
-          RatePercent: new Prisma.Decimal(rate),
-          IsActive: activeFlag,
-          ActivatedAt: null,
-          EffectiveFrom: effectiveFrom,
-          EffectiveTo: effectiveTo,
-          DeletedAt: null,
-          createdBy: { connect: { AdminID: adminId } },
-          updatedBy: { connect: { AdminID: adminId } },
-        },
-        select: {
-          FeeID: true,
-          FeeName: true,
-          PaymentMethod: true,
-          PaymentProviderCode: true,
-          RatePercent: true,
-          IsActive: true,
-          ActivatedAt: true,
-          EffectiveFrom: true,
-          EffectiveTo: true,
-          CreatedAt: true,
-          updatedBy: {
-            select: {
-              account: { select: { Username: true, Email: true } },
-            },
+    const created = await this.prisma.transactionFeeRule.create({
+      data: {
+        FeeName: feeName,
+        PaymentMethod: method,
+        PaymentProviderCode: normalizedProvider,
+        RatePercent: new Prisma.Decimal(rate),
+        IsActive: activeFlag,
+        ActivatedAt: null,
+        EffectiveFrom: effectiveFrom,
+        EffectiveTo: effectiveTo,
+        DeletedAt: null,
+        createdBy: { connect: { AdminID: adminId } },
+        updatedBy: { connect: { AdminID: adminId } },
+      },
+      select: {
+        FeeID: true,
+        FeeName: true,
+        PaymentMethod: true,
+        PaymentProviderCode: true,
+        RatePercent: true,
+        IsActive: true,
+        ActivatedAt: true,
+        ExpiredAt: true,
+        EffectiveFrom: true,
+        EffectiveTo: true,
+        CreatedAt: true,
+        updatedBy: {
+          select: {
+            account: { select: { Username: true, Email: true } },
           },
         },
-      });
-      return { success: true as const, item: mapFeeRow(created) };
-    } catch (e) {
-      if (
-        e instanceof Prisma.PrismaClientKnownRequestError &&
-        e.code === 'P2002'
-      ) {
-        throw new ConflictException(
-          'A rule with this channel and effective start already exists',
-        );
-      }
-      throw e;
-    }
-  }
-
-  private async assertNoDuplicateRule(
-    method: PaymentMethod,
-    providerCode: string | null,
-    effectiveFrom: Date,
-    excludeFeeId?: string,
-  ) {
-    const dup = await this.prisma.transactionFeeRule.findFirst({
-      where: {
-        PaymentMethod: method,
-        PaymentProviderCode: providerCode,
-        EffectiveFrom: effectiveFrom,
-        DeletedAt: null,
-        ...(excludeFeeId ? { NOT: { FeeID: excludeFeeId } } : {}),
       },
-      select: { FeeID: true },
     });
-    if (dup) {
-      throw new ConflictException(
-        'A rule with this channel and effective start already exists',
-      );
-    }
+    return { success: true as const, item: mapFeeRow(created) };
   }
 
   async updateChannelRule(
@@ -682,16 +902,18 @@ export class AdminTransactionFeesService {
     },
   ) {
     const adminId = await this.requireAdminId(accountId);
-    const id = asTrimmedString(feeId);
-    if (!id) throw new BadRequestException('feeId is required');
+    const feeIdNormalized = asTrimmedString(feeId);
+    if (!feeIdNormalized) throw new BadRequestException('feeId is required');
 
     const existing = await this.prisma.transactionFeeRule.findUnique({
-      where: { FeeID: id },
+      where: { FeeID: feeIdNormalized },
       select: {
         FeeID: true,
         PaymentMethod: true,
         PaymentProviderCode: true,
+        IsActive: true,
         ActivatedAt: true,
+        ExpiredAt: true,
         EffectiveFrom: true,
         EffectiveTo: true,
         DeletedAt: true,
@@ -705,85 +927,23 @@ export class AdminTransactionFeesService {
       updatedBy: { connect: { AdminID: adminId } },
     };
 
-    let mergedMethod = existing.PaymentMethod;
-    let mergedProvider =
-      existing.PaymentProviderCode == null ||
-      existing.PaymentProviderCode === ''
-        ? null
-        : existing.PaymentProviderCode.trim().toLowerCase();
+    const { mergedMethod, mergedProvider } = this.mergeChannelPatch(existing, body, data);
+    this.mergeFeeNamePatch(body, data);
+    this.mergeRatePercentPatch(body, data);
+    this.mergeActivationPatch(existing, body, data);
+    this.mergeEffectiveWindowPatch(existing, body, data);
 
-    if (body.paymentChannel !== undefined) {
-      const ch = asTrimmedString(body.paymentChannel);
-      if (!ch) throw new BadRequestException('paymentChannel is invalid');
-      const mapped = parseUiPaymentChannelToDb(ch);
-      mergedMethod = mapped.method;
-      mergedProvider =
-        mapped.providerCode == null || mapped.providerCode === ''
-          ? null
-          : mapped.providerCode.trim().toLowerCase();
-      data.PaymentMethod = mergedMethod;
-      data.PaymentProviderCode = mergedProvider;
-    }
-
-    if (body.feeName !== undefined) {
-      const name = asTrimmedString(body.feeName);
-      if (!name) throw new BadRequestException('feeName is invalid');
-      data.FeeName = name;
-    }
-
-    if (body.ratePercent !== undefined) {
-      data.RatePercent = new Prisma.Decimal(parseRatePercent(body.ratePercent));
-    }
-
-    if (body.isActive !== undefined) {
-      const b = asBoolean(body.isActive);
-      if (b === null)
-        throw new BadRequestException('isActive must be a boolean');
-      if (!existing.ActivatedAt) {
-        if (b === false) {
-          throw new BadRequestException('Cannot set Pending rule to Inactive');
-        }
-        data.ActivatedAt = new Date();
+    const updated = await this.prisma.$transaction(async (tx) => {
+      if (data.IsActive === true) {
+        await this.deactivateOtherActiveRulesInChannel(tx, {
+          feeId: feeIdNormalized,
+          mergedMethod,
+          mergedProvider,
+        });
       }
-      data.IsActive = b;
-    }
 
-    let mergedEffectiveFrom = existing.EffectiveFrom;
-    if (body.effectiveFrom !== undefined) {
-      const d = parseDateOnlyRequired(body.effectiveFrom, 'effectiveFrom');
-      data.EffectiveFrom = d;
-      mergedEffectiveFrom = d;
-    }
-
-    const minFrom = todayDateOnlyUtc();
-    if (mergedEffectiveFrom.getTime() < minFrom.getTime()) {
-      throw new BadRequestException('effectiveFrom cannot be in the past');
-    }
-
-    let mergedEffectiveTo: Date | null = existing.EffectiveTo;
-    if (body.effectiveTo !== undefined) {
-      const raw = body.effectiveTo;
-      mergedEffectiveTo =
-        raw === null || raw === ''
-          ? null
-          : parseDateOnlyRequired(raw, 'effectiveTo');
-    }
-    if (!mergedEffectiveTo) mergedEffectiveTo = addDaysUtc(mergedEffectiveFrom, 1);
-    if (mergedEffectiveTo.getTime() < mergedEffectiveFrom.getTime()) {
-      throw new BadRequestException('effectiveTo must be on or after effectiveFrom');
-    }
-    data.EffectiveTo = mergedEffectiveTo;
-
-    await this.assertNoDuplicateRule(
-      mergedMethod,
-      mergedProvider,
-      mergedEffectiveFrom,
-      id,
-    );
-
-    try {
-      const updated = await this.prisma.transactionFeeRule.update({
-        where: { FeeID: id },
+      return tx.transactionFeeRule.update({
+        where: { FeeID: feeIdNormalized },
         data,
         select: {
           FeeID: true,
@@ -793,6 +953,7 @@ export class AdminTransactionFeesService {
           RatePercent: true,
           IsActive: true,
           ActivatedAt: true,
+          ExpiredAt: true,
           EffectiveFrom: true,
           EffectiveTo: true,
           CreatedAt: true,
@@ -803,18 +964,9 @@ export class AdminTransactionFeesService {
           },
         },
       });
-      return { success: true as const, item: mapFeeRow(updated) };
-    } catch (e) {
-      if (
-        e instanceof Prisma.PrismaClientKnownRequestError &&
-        e.code === 'P2002'
-      ) {
-        throw new ConflictException(
-          'A rule with this channel and effective start already exists',
-        );
-      }
-      throw e;
-    }
+    });
+
+    return { success: true as const, item: mapFeeRow(updated) };
   }
 
   parseListQuery(input: {

@@ -523,6 +523,7 @@ model TransactionFeeRule {
   RatePercent        Decimal     @db.Decimal(5, 2)
   IsActive           Boolean     @default(true)
   ActivatedAt        DateTime?
+  ExpiredAt          DateTime?
   EffectiveFrom      DateTime    @default(now())
   EffectiveTo        DateTime?
   DeletedAt          DateTime?
@@ -539,11 +540,12 @@ model TransactionFeeRule {
   @@index([PaymentProviderCode])
   @@index([IsActive])
   @@index([ActivatedAt])
+  @@index([ExpiredAt])
   @@index([EffectiveFrom, EffectiveTo])
   @@index([DeletedAt])
   @@index([CreatedByAdminID])
   @@index([UpdatedByAdminID])
-  @@unique([PaymentMethod, PaymentProviderCode, EffectiveFrom])
+  @@index([PaymentMethod, PaymentProviderCode, EffectiveFrom])
   @@map("TRANSACTION_FEE_RULE")
 }
 
@@ -553,6 +555,7 @@ model TransactionFeeGlobalRule {
   RatePercent       Decimal   @db.Decimal(5, 2)
   IsActive          Boolean   @default(false)
   ActivatedAt       DateTime?
+  ExpiredAt         DateTime?
   EffectiveFrom     DateTime  @default(now())
   EffectiveTo       DateTime?
   DeletedAt         DateTime?
@@ -566,6 +569,7 @@ model TransactionFeeGlobalRule {
 
   @@index([IsActive])
   @@index([ActivatedAt])
+  @@index([ExpiredAt])
   @@index([EffectiveFrom, EffectiveTo])
   @@index([DeletedAt])
   @@index([CreatedByAdminID])
@@ -615,6 +619,7 @@ model PlatformCommissionGlobalRule {
   CommissionPercent Decimal   @db.Decimal(5, 2)
   IsActive          Boolean   @default(false)
   ActivatedAt       DateTime?
+  ExpiredAt         DateTime?
   EffectiveFrom     DateTime  @default(now())
   EffectiveTo       DateTime?
   DeletedAt         DateTime?
@@ -628,6 +633,7 @@ model PlatformCommissionGlobalRule {
 
   @@index([IsActive])
   @@index([ActivatedAt])
+  @@index([ExpiredAt])
   @@index([EffectiveFrom, EffectiveTo])
   @@index([DeletedAt])
   @@index([CreatedByAdminID])
@@ -642,6 +648,7 @@ model CategoryCommissionDefault {
   CommissionPercent   Decimal   @db.Decimal(5, 2)
   IsActive            Boolean   @default(true)
   ActivatedAt         DateTime?
+  ExpiredAt           DateTime?
   CreatedAt           DateTime  @default(now())
   EffectiveFrom       DateTime  @default(now())
   EffectiveTo         DateTime?
@@ -652,10 +659,11 @@ model CategoryCommissionDefault {
   foodCategory FoodCategory @relation(fields: [FoodCategoryID], references: [CategoryID], onDelete: Cascade)
   updatedBy    Admin?       @relation("CategoryCommissionDefaultUpdatedBy", fields: [UpdatedByAdminID], references: [AdminID], onDelete: SetNull)
 
-  @@unique([FoodCategoryID, EffectiveFrom])
+  @@index([FoodCategoryID, EffectiveFrom])
   @@index([FoodCategoryID])
   @@index([IsActive])
   @@index([ActivatedAt])
+  @@index([ExpiredAt])
   @@index([EffectiveFrom, EffectiveTo])
   @@index([DeletedAt])
   @@index([UpdatedByAdminID])
