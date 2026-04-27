@@ -23,19 +23,27 @@ import {
   type TransactionFeeChannelFilterToken,
 } from '@modules/admin/admin-transaction-fees/transaction-fee-channel.utils';
 
-function mapGlobalRuleRow(row: {
-  RuleID: string;
-  RuleName: string | null;
-  RatePercent: Prisma.Decimal;
-  IsActive: boolean;
-  ActivatedAt: Date | null;
-  ExpiredAt?: Date | null;
-  EffectiveFrom: Date;
-  EffectiveTo: Date | null;
-  CreatedAt: Date;
-  UpdatedAt: Date | null;
-  updatedBy: { account: { Username: string; Email: string } | null } | null;
-}) {
+const globalRuleSelect = Prisma.validator<Prisma.TransactionFeeGlobalRuleSelect>()({
+  RuleID: true,
+  RuleName: true,
+  RatePercent: true,
+  IsActive: true,
+  ActivatedAt: true,
+  ExpiredAt: true,
+  EffectiveFrom: true,
+  EffectiveTo: true,
+  CreatedAt: true,
+  UpdatedAt: true,
+  updatedBy: {
+    select: { account: { select: { Username: true, Email: true } } },
+  },
+});
+
+type GlobalRuleRow = Prisma.TransactionFeeGlobalRuleGetPayload<{
+  select: typeof globalRuleSelect;
+}>;
+
+function mapGlobalRuleRow(row: GlobalRuleRow) {
   const updatedByAccount = row.updatedBy?.account;
   return {
     RuleID: row.RuleID,
@@ -119,6 +127,29 @@ function mapFeeRow(row: {
       updatedByAccount?.Email || updatedByAccount?.Username || null,
   };
 }
+
+const feeRuleSelect = Prisma.validator<Prisma.TransactionFeeRuleSelect>()({
+  FeeID: true,
+  FeeName: true,
+  PaymentMethod: true,
+  PaymentProviderCode: true,
+  RatePercent: true,
+  IsActive: true,
+  ActivatedAt: true,
+  ExpiredAt: true,
+  EffectiveFrom: true,
+  EffectiveTo: true,
+  CreatedAt: true,
+  updatedBy: {
+    select: {
+      account: { select: { Username: true, Email: true } },
+    },
+  },
+});
+
+type FeeRuleRow = Prisma.TransactionFeeRuleGetPayload<{
+  select: typeof feeRuleSelect;
+}>;
 
 function normalizeProviderCode(providerCode: string | null): string | null {
   if (providerCode == null) return null;
@@ -345,21 +376,7 @@ export class AdminTransactionFeesService {
     const row = await this.prisma.transactionFeeGlobalRule.findFirst({
       where: { DeletedAt: null, IsActive: true },
       orderBy: [{ EffectiveFrom: 'desc' }, { CreatedAt: 'desc' }],
-      select: {
-        RuleID: true,
-        RuleName: true,
-        RatePercent: true,
-        IsActive: true,
-        ActivatedAt: true,
-        ExpiredAt: true,
-        EffectiveFrom: true,
-        EffectiveTo: true,
-        CreatedAt: true,
-        UpdatedAt: true,
-        updatedBy: {
-          select: { account: { select: { Username: true, Email: true } } },
-        },
-      },
+      select: globalRuleSelect,
     });
     if (!row) return null;
     const mapped = mapGlobalRuleRow(row);
@@ -383,23 +400,11 @@ export class AdminTransactionFeesService {
     const rows = await this.prisma.transactionFeeGlobalRule.findMany({
       where: { DeletedAt: null },
       orderBy: [{ IsActive: 'desc' }, { EffectiveFrom: 'desc' }, { CreatedAt: 'desc' }],
-      select: {
-        RuleID: true,
-        RuleName: true,
-        RatePercent: true,
-        IsActive: true,
-        ActivatedAt: true,
-        ExpiredAt: true,
-        EffectiveFrom: true,
-        EffectiveTo: true,
-        CreatedAt: true,
-        UpdatedAt: true,
-        updatedBy: {
-          select: { account: { select: { Username: true, Email: true } } },
-        },
-      },
+      select: globalRuleSelect,
     });
-    return { items: rows.map((row) => mapGlobalRuleRow(row)) };
+    return {
+      items: rows.map(mapGlobalRuleRow),
+    };
   }
 
   async createGlobalRule(
@@ -411,7 +416,6 @@ export class AdminTransactionFeesService {
       effectiveFrom?: unknown;
       effectiveTo?: unknown;
     },
-    opts?: { forceActivate?: boolean },
   ) {
     const adminId = await this.requireAdminId(accountId);
     const rate = parseRatePercent(body.ratePercent);
@@ -448,24 +452,14 @@ export class AdminTransactionFeesService {
           createdBy: { connect: { AdminID: adminId } },
           updatedBy: { connect: { AdminID: adminId } },
         },
-        select: {
-          RuleID: true,
-          RuleName: true,
-          RatePercent: true,
-          IsActive: true,
-          ActivatedAt: true,
-          EffectiveFrom: true,
-          EffectiveTo: true,
-          CreatedAt: true,
-          UpdatedAt: true,
-          updatedBy: {
-            select: { account: { select: { Username: true, Email: true } } },
-          },
-        },
+        select: globalRuleSelect,
       });
     });
 
-    return { success: true as const, item: mapGlobalRuleRow(created) };
+    return {
+      success: true as const,
+      item: mapGlobalRuleRow(created),
+    };
   }
 
   async updateGlobalRule(
@@ -552,22 +546,12 @@ export class AdminTransactionFeesService {
     const updated = await this.prisma.transactionFeeGlobalRule.update({
       where: { RuleID: id },
       data,
-      select: {
-        RuleID: true,
-        RuleName: true,
-        RatePercent: true,
-        IsActive: true,
-        ActivatedAt: true,
-        EffectiveFrom: true,
-        EffectiveTo: true,
-        CreatedAt: true,
-        UpdatedAt: true,
-        updatedBy: {
-          select: { account: { select: { Username: true, Email: true } } },
-        },
-      },
+      select: globalRuleSelect,
     });
-    return { success: true as const, item: mapGlobalRuleRow(updated) };
+    return {
+      success: true as const,
+      item: mapGlobalRuleRow(updated),
+    };
   }
 
   async activateGlobalRule(accountId: string, ruleId: string) {
@@ -597,24 +581,14 @@ export class AdminTransactionFeesService {
           ActivatedAt: new Date(),
           updatedBy: { connect: { AdminID: adminId } },
         },
-        select: {
-          RuleID: true,
-          RuleName: true,
-          RatePercent: true,
-          IsActive: true,
-          ActivatedAt: true,
-          EffectiveFrom: true,
-          EffectiveTo: true,
-          CreatedAt: true,
-          UpdatedAt: true,
-          updatedBy: {
-            select: { account: { select: { Username: true, Email: true } } },
-          },
-        },
+        select: globalRuleSelect,
       });
     });
 
-    return { success: true as const, item: mapGlobalRuleRow(updated) };
+    return {
+      success: true as const,
+      item: mapGlobalRuleRow(updated),
+    };
   }
 
   async listChannelRules(params: {
@@ -715,45 +689,13 @@ export class AdminTransactionFeesService {
         ? this.prisma.transactionFeeGlobalRule.findMany({
           where: globalWhere,
           orderBy: [{ EffectiveFrom: 'desc' }, { CreatedAt: 'desc' }],
-          select: {
-            RuleID: true,
-            RuleName: true,
-            RatePercent: true,
-            IsActive: true,
-            ActivatedAt: true,
-            ExpiredAt: true,
-            EffectiveFrom: true,
-            EffectiveTo: true,
-            CreatedAt: true,
-            updatedBy: {
-              select: {
-                account: { select: { Username: true, Email: true } },
-              },
-            },
-          },
+          select: globalRuleSelect,
         })
-        : Promise.resolve([]),
+        : Promise.resolve<GlobalRuleRow[]>([]),
       this.prisma.transactionFeeRule.findMany({
         where,
         orderBy: [{ EffectiveFrom: 'desc' }, { CreatedAt: 'desc' }],
-        select: {
-          FeeID: true,
-          FeeName: true,
-          PaymentMethod: true,
-          PaymentProviderCode: true,
-          RatePercent: true,
-          IsActive: true,
-          ActivatedAt: true,
-          ExpiredAt: true,
-          EffectiveFrom: true,
-          EffectiveTo: true,
-          CreatedAt: true,
-          updatedBy: {
-            select: {
-              account: { select: { Username: true, Email: true } },
-            },
-          },
-        },
+        select: feeRuleSelect,
       }),
     ]);
 
@@ -779,32 +721,12 @@ export class AdminTransactionFeesService {
     const id = asTrimmedString(feeId);
     if (!id) throw new BadRequestException('feeId is required');
 
-    const row = await this.prisma.transactionFeeRule.findUnique({
-      where: { FeeID: id },
-      select: {
-        FeeID: true,
-        FeeName: true,
-        PaymentMethod: true,
-        PaymentProviderCode: true,
-        RatePercent: true,
-        IsActive: true,
-        ActivatedAt: true,
-        ExpiredAt: true,
-        EffectiveFrom: true,
-        EffectiveTo: true,
-        CreatedAt: true,
-        DeletedAt: true,
-        updatedBy: {
-          select: {
-            account: { select: { Username: true, Email: true } },
-          },
-        },
-      },
+    const row = await this.prisma.transactionFeeRule.findFirst({
+      where: { FeeID: id, DeletedAt: null },
+      select: feeRuleSelect,
     });
-    if (!row || row.DeletedAt) {
-      throw new NotFoundException('Transaction fee rule not found');
-    }
-    return mapFeeRow(row);
+    if (!row) throw new NotFoundException('Transaction fee rule not found');
+    return mapFeeRow(row satisfies FeeRuleRow);
   }
 
   async createChannelRule(
@@ -867,24 +789,7 @@ export class AdminTransactionFeesService {
         createdBy: { connect: { AdminID: adminId } },
         updatedBy: { connect: { AdminID: adminId } },
       },
-      select: {
-        FeeID: true,
-        FeeName: true,
-        PaymentMethod: true,
-        PaymentProviderCode: true,
-        RatePercent: true,
-        IsActive: true,
-        ActivatedAt: true,
-        ExpiredAt: true,
-        EffectiveFrom: true,
-        EffectiveTo: true,
-        CreatedAt: true,
-        updatedBy: {
-          select: {
-            account: { select: { Username: true, Email: true } },
-          },
-        },
-      },
+      select: feeRuleSelect,
     });
     return { success: true as const, item: mapFeeRow(created) };
   }

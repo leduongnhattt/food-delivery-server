@@ -104,9 +104,7 @@ export class AdminCommissionFeesController {
       throw new UnauthorizedException('Unauthorized');
     }
     // Back-compat: PATCH /global creates a new rule (pending by default).
-    return this.service.createGlobalRule(account.accountId, body, {
-      forceActivate: false,
-    });
+    return this.service.createGlobalRule(account.accountId, body);
   }
 
   @Get('category-rules')

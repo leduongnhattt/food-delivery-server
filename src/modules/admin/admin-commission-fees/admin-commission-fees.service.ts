@@ -17,19 +17,27 @@ import {
   toDateOnlyString,
 } from '@common/utils/finance-rule.utils';
 
-function mapGlobalRuleRow(row: {
-  RuleID: string;
-  RuleName: string | null;
-  CommissionPercent: Prisma.Decimal;
-  IsActive: boolean;
-  ActivatedAt: Date | null;
-  ExpiredAt?: Date | null;
-  EffectiveFrom: Date;
-  EffectiveTo: Date | null;
-  CreatedAt: Date;
-  UpdatedAt: Date | null;
-  updatedBy: { account: { Username: string; Email: string } | null } | null;
-}) {
+const globalRuleSelect = Prisma.validator<Prisma.PlatformCommissionGlobalRuleSelect>()({
+  RuleID: true,
+  RuleName: true,
+  CommissionPercent: true,
+  IsActive: true,
+  ActivatedAt: true,
+  ExpiredAt: true,
+  EffectiveFrom: true,
+  EffectiveTo: true,
+  CreatedAt: true,
+  UpdatedAt: true,
+  updatedBy: {
+    select: { account: { select: { Username: true, Email: true } } },
+  },
+});
+
+type GlobalRuleRow = Prisma.PlatformCommissionGlobalRuleGetPayload<{
+  select: typeof globalRuleSelect;
+}>;
+
+function mapGlobalRuleRow(row: GlobalRuleRow) {
   const updatedByAccount = row.updatedBy?.account;
   return {
     RuleID: row.RuleID,
@@ -88,6 +96,30 @@ function mapCategoryRow(row: {
     UpdatedByLabel: updatedByLabel,
   };
 }
+
+const categoryRuleSelect =
+  Prisma.validator<Prisma.CategoryCommissionDefaultSelect>()({
+    CommissionDefaultID: true,
+    FoodCategoryID: true,
+    RuleName: true,
+    CommissionPercent: true,
+    IsActive: true,
+    ActivatedAt: true,
+    ExpiredAt: true,
+    EffectiveFrom: true,
+    EffectiveTo: true,
+    CreatedAt: true,
+    foodCategory: { select: { CategoryName: true } },
+    updatedBy: {
+      select: {
+        account: { select: { Username: true, Email: true } },
+      },
+    },
+  });
+
+type CategoryRuleRow = Prisma.CategoryCommissionDefaultGetPayload<{
+  select: typeof categoryRuleSelect;
+}>;
 
 /** Sentinel `FoodCategoryID` for global rows merged into category-rules list (not a real category). */
 const GLOBAL_RULE_LIST_FOOD_CATEGORY_ID = '__GLOBAL__';
@@ -155,21 +187,7 @@ export class AdminCommissionFeesService {
     const row = await this.prisma.platformCommissionGlobalRule.findFirst({
       where: { DeletedAt: null, IsActive: true },
       orderBy: [{ EffectiveFrom: 'desc' }, { CreatedAt: 'desc' }],
-      select: {
-        RuleID: true,
-        RuleName: true,
-        CommissionPercent: true,
-        IsActive: true,
-        ActivatedAt: true,
-        ExpiredAt: true,
-        EffectiveFrom: true,
-        EffectiveTo: true,
-        CreatedAt: true,
-        UpdatedAt: true,
-        updatedBy: {
-          select: { account: { select: { Username: true, Email: true } } },
-        },
-      },
+      select: globalRuleSelect,
     });
     if (!row) return null;
     const mapped = mapGlobalRuleRow(row);
@@ -192,23 +210,11 @@ export class AdminCommissionFeesService {
     const rows = await this.prisma.platformCommissionGlobalRule.findMany({
       where: { DeletedAt: null },
       orderBy: [{ IsActive: 'desc' }, { EffectiveFrom: 'desc' }, { CreatedAt: 'desc' }],
-      select: {
-        RuleID: true,
-        RuleName: true,
-        CommissionPercent: true,
-        IsActive: true,
-        ActivatedAt: true,
-        ExpiredAt: true,
-        EffectiveFrom: true,
-        EffectiveTo: true,
-        CreatedAt: true,
-        UpdatedAt: true,
-        updatedBy: {
-          select: { account: { select: { Username: true, Email: true } } },
-        },
-      },
+      select: globalRuleSelect,
     });
-    return { items: rows.map((row) => mapGlobalRuleRow(row)) };
+    return {
+      items: rows.map(mapGlobalRuleRow),
+    };
   }
 
   async createGlobalRule(
@@ -220,7 +226,6 @@ export class AdminCommissionFeesService {
       effectiveFrom?: unknown;
       effectiveTo?: unknown;
     },
-    opts?: { forceActivate?: boolean },
   ) {
     const adminId = await this.requireAdminId(accountId);
     const pct = parseCommissionPercent(body.commissionPercent);
@@ -259,24 +264,14 @@ export class AdminCommissionFeesService {
           createdBy: { connect: { AdminID: adminId } },
           updatedBy: { connect: { AdminID: adminId } },
         },
-        select: {
-          RuleID: true,
-          RuleName: true,
-          CommissionPercent: true,
-          IsActive: true,
-          ActivatedAt: true,
-          EffectiveFrom: true,
-          EffectiveTo: true,
-          CreatedAt: true,
-          UpdatedAt: true,
-          updatedBy: {
-            select: { account: { select: { Username: true, Email: true } } },
-          },
-        },
+        select: globalRuleSelect,
       });
     });
 
-    return { success: true as const, item: mapGlobalRuleRow(created) };
+    return {
+      success: true as const,
+      item: mapGlobalRuleRow(created),
+    };
   }
 
   async updateGlobalRule(
@@ -362,22 +357,12 @@ export class AdminCommissionFeesService {
     const updated = await this.prisma.platformCommissionGlobalRule.update({
       where: { RuleID: id },
       data,
-      select: {
-        RuleID: true,
-        RuleName: true,
-        CommissionPercent: true,
-        IsActive: true,
-        ActivatedAt: true,
-        EffectiveFrom: true,
-        EffectiveTo: true,
-        CreatedAt: true,
-        UpdatedAt: true,
-        updatedBy: {
-          select: { account: { select: { Username: true, Email: true } } },
-        },
-      },
+      select: globalRuleSelect,
     });
-    return { success: true as const, item: mapGlobalRuleRow(updated) };
+    return {
+      success: true as const,
+      item: mapGlobalRuleRow(updated),
+    };
   }
 
   async activateGlobalRule(accountId: string, ruleId: string) {
@@ -407,24 +392,14 @@ export class AdminCommissionFeesService {
           ActivatedAt: new Date(),
           updatedBy: { connect: { AdminID: adminId } },
         },
-        select: {
-          RuleID: true,
-          RuleName: true,
-          CommissionPercent: true,
-          IsActive: true,
-          ActivatedAt: true,
-          EffectiveFrom: true,
-          EffectiveTo: true,
-          CreatedAt: true,
-          UpdatedAt: true,
-          updatedBy: {
-            select: { account: { select: { Username: true, Email: true } } },
-          },
-        },
+        select: globalRuleSelect,
       });
     });
 
-    return { success: true as const, item: mapGlobalRuleRow(updated) };
+    return {
+      success: true as const,
+      item: mapGlobalRuleRow(updated),
+    };
   }
 
   async listCategoryRules(params: {
@@ -492,42 +467,6 @@ export class AdminCommissionFeesService {
       ];
     }
 
-    const globalSelect = {
-      RuleID: true,
-      RuleName: true,
-      CommissionPercent: true,
-      IsActive: true,
-      ActivatedAt: true,
-      ExpiredAt: true,
-      EffectiveFrom: true,
-      EffectiveTo: true,
-      CreatedAt: true,
-      updatedBy: {
-        select: {
-          account: { select: { Username: true, Email: true } },
-        },
-      },
-    } as const;
-
-    const categorySelect = {
-      CommissionDefaultID: true,
-      FoodCategoryID: true,
-      RuleName: true,
-      CommissionPercent: true,
-      IsActive: true,
-      ActivatedAt: true,
-      ExpiredAt: true,
-      EffectiveFrom: true,
-      EffectiveTo: true,
-      CreatedAt: true,
-      foodCategory: { select: { CategoryName: true } },
-      updatedBy: {
-        select: {
-          account: { select: { Username: true, Email: true } },
-        },
-      },
-    } as const;
-
     const foodCategoryId = params.foodCategoryId?.trim();
     const includeGlobalRows = !foodCategoryId;
 
@@ -572,13 +511,13 @@ export class AdminCommissionFeesService {
         ? this.prisma.platformCommissionGlobalRule.findMany({
           where: globalWhere,
           orderBy: [{ EffectiveFrom: 'desc' }, { CreatedAt: 'desc' }],
-          select: globalSelect,
+          select: globalRuleSelect,
         })
-        : Promise.resolve([]),
+        : Promise.resolve<GlobalRuleRow[]>([]),
       this.prisma.categoryCommissionDefault.findMany({
         where,
         orderBy: [{ EffectiveFrom: 'desc' }, { CreatedAt: 'desc' }],
-        select: categorySelect,
+        select: categoryRuleSelect,
       }),
     ]);
 
@@ -604,30 +543,12 @@ export class AdminCommissionFeesService {
     const rid = asTrimmedString(id);
     if (!rid) throw new BadRequestException('id is required');
 
-    const row = await this.prisma.categoryCommissionDefault.findUnique({
-      where: { CommissionDefaultID: rid },
-      select: {
-        CommissionDefaultID: true,
-        FoodCategoryID: true,
-        RuleName: true,
-        CommissionPercent: true,
-        IsActive: true,
-        ActivatedAt: true,
-        ExpiredAt: true,
-        EffectiveFrom: true,
-        EffectiveTo: true,
-        CreatedAt: true,
-        DeletedAt: true,
-        foodCategory: { select: { CategoryName: true } },
-        updatedBy: {
-          select: {
-            account: { select: { Username: true, Email: true } },
-          },
-        },
-      },
+    const row = await this.prisma.categoryCommissionDefault.findFirst({
+      where: { CommissionDefaultID: rid, DeletedAt: null },
+      select: categoryRuleSelect,
     });
-    if (!row || row.DeletedAt) throw new NotFoundException('Commission rule not found');
-    return mapCategoryRow(row);
+    if (!row) throw new NotFoundException('Commission rule not found');
+    return mapCategoryRow(row satisfies CategoryRuleRow);
   }
 
   async createCategoryRule(
@@ -686,24 +607,7 @@ export class AdminCommissionFeesService {
         EffectiveTo: effectiveTo,
         DeletedAt: null,
       },
-      select: {
-        CommissionDefaultID: true,
-        FoodCategoryID: true,
-        RuleName: true,
-        CommissionPercent: true,
-        IsActive: true,
-        ActivatedAt: true,
-        ExpiredAt: true,
-        EffectiveFrom: true,
-        EffectiveTo: true,
-        CreatedAt: true,
-        foodCategory: { select: { CategoryName: true } },
-        updatedBy: {
-          select: {
-            account: { select: { Username: true, Email: true } },
-          },
-        },
-      },
+      select: categoryRuleSelect,
     });
     return { success: true as const, item: mapCategoryRow(created) };
   }

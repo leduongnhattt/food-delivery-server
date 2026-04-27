@@ -61,8 +61,9 @@ export class EnterpriseProfileService {
           Description: true,
           Price: true,
           ImageURL: true,
-          Stock: true,
           IsAvailable: true,
+          CreatedAt: true,
+          UpdatedAt: true,
           foodCategory: {
             select: {
               CategoryID: true,
