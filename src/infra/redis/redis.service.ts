@@ -48,6 +48,18 @@ export async function setKeyJson(
   }
 }
 
+export async function getOrSetJson<T>(
+  key: string,
+  ttlSeconds: number,
+  loader: () => Promise<T>,
+): Promise<T> {
+  const cached = await getKeyJson<T>(key);
+  if (cached !== null) return cached;
+  const value = await loader();
+  await setKeyJson(key, value, ttlSeconds);
+  return value;
+}
+
 export async function deleteKey(key: string): Promise<void> {
   if (!redisClient) return;
   await redisClient.del(key);

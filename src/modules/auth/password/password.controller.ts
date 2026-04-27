@@ -1,9 +1,10 @@
-import { Body, Controller, Post, Res, UseGuards } from '@nestjs/common';
-import type { Response } from 'express';
-import { AuthService, type JwtPayload } from '@modules/auth/auth.service';
+import { Body, Controller, Post, Req, Res, UseGuards } from '@nestjs/common';
+import type { Request, Response } from 'express';
+import { AuthService } from '@modules/auth/auth.service';
 import { AuthPasswordService } from './password.service';
 import { JwtAuthGuard } from '@common/guards';
 import { CurrentAccount } from '@common/decorators';
+import type { JwtPayload } from '@modules/auth/auth.service';
 
 @Controller('auth')
 export class AuthPasswordController {
@@ -12,12 +13,45 @@ export class AuthPasswordController {
     private readonly authPasswordService: AuthPasswordService,
   ) {}
 
+  private optionalJwtEnforceSameEmail(
+    req: Request,
+    requestedEmail: string,
+    res: Response,
+  ): Response | null {
+    const authHeader = req?.headers?.authorization;
+    const token =
+      typeof authHeader === 'string' && authHeader.startsWith('Bearer ')
+        ? authHeader.replace('Bearer ', '')
+        : '';
+    const decoded = token ? this.authService.verifyAccessToken(token) : null;
+    const accountEmail = decoded?.email ? String(decoded.email).trim() : '';
+    if (!accountEmail) return null;
+
+    const accountEmailLower = accountEmail.toLowerCase();
+    const requestedEmailLower = (requestedEmail || '').trim().toLowerCase();
+    if (requestedEmailLower && accountEmailLower !== requestedEmailLower) {
+      return res.status(403).json({
+        error: 'Email is not associated with the authenticated account',
+      });
+    }
+    return null;
+  }
+
   @Post('forgot-password')
-  async forgotPassword(@Body() body: { email?: string }, @Res() res: Response) {
+  async forgotPassword(
+    @Body() body: { email?: string },
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
     try {
-      const result = await this.authPasswordService.forgotPassword(
-        body?.email ?? '',
-      );
+      const requested = (body?.email ?? '').trim();
+
+      // Optional JWT check: if user is authenticated, only allow their own email.
+      // Do NOT require token (route remains public).
+      const enforced = this.optionalJwtEnforceSameEmail(req, requested, res);
+      if (enforced) return enforced;
+
+      const result = await this.authPasswordService.forgotPassword(requested);
       if (result.error) {
         const status = result.error.includes('Too many') ? 429 : 400;
         return res.status(status).json({ error: result.error });
@@ -29,6 +63,37 @@ export class AuthPasswordController {
       });
     } catch (error) {
       console.error('Forgot password error:', error);
+      return res.status(500).json({
+        error: 'An unexpected error occurred. Please try again.',
+      });
+    }
+  }
+
+  @Post('resend-reset-code')
+  async resendResetCode(
+    @Body() body: { email?: string },
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    try {
+      const requested = (body?.email ?? '').trim();
+      // Optional JWT check: if authenticated, only allow their own email.
+      const enforced = this.optionalJwtEnforceSameEmail(req, requested, res);
+      if (enforced) return enforced;
+
+      const result = await this.authPasswordService.resendResetCode(
+        requested,
+      );
+      if (result.error) {
+        const status = result.error.includes('Too many') ? 429 : 404;
+        return res.status(status).json({ error: result.error });
+      }
+      return res.status(200).json({
+        success: true,
+        message: 'New reset code has been sent to your email',
+      });
+    } catch (error) {
+      console.error('Resend reset code error:', error);
       return res.status(500).json({
         error: 'An unexpected error occurred. Please try again.',
       });
@@ -57,31 +122,6 @@ export class AuthPasswordController {
       });
     } catch (error) {
       console.error('Verify reset code error:', error);
-      return res.status(500).json({
-        error: 'An unexpected error occurred. Please try again.',
-      });
-    }
-  }
-
-  @Post('resend-reset-code')
-  async resendResetCode(
-    @Body() body: { email?: string },
-    @Res() res: Response,
-  ) {
-    try {
-      const result = await this.authPasswordService.resendResetCode(
-        body?.email ?? '',
-      );
-      if (result.error) {
-        const status = result.error.includes('Too many') ? 429 : 404;
-        return res.status(status).json({ error: result.error });
-      }
-      return res.status(200).json({
-        success: true,
-        message: 'New reset code has been sent to your email',
-      });
-    } catch (error) {
-      console.error('Resend reset code error:', error);
       return res.status(500).json({
         error: 'An unexpected error occurred. Please try again.',
       });

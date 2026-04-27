@@ -12,6 +12,8 @@ import { ORDER_CANCEL_REASON } from '@common/constants/order-payment-status.cons
 import { deleteKey } from '@infra/redis/redis.service';
 import { EtaService } from '@modules/shipping/eta.service';
 import { invalidateEnterpriseOrderCaches } from '@modules/enterprise/orders/enterprise-order-cache.util';
+import { CommissionSettlementService } from '@modules/payments/commission-settlement/commission-settlement.service';
+import { DeliveryFeeService } from '@modules/shipping/delivery-fee.service';
 
 type FoodWithImageURL = {
   ImageURL?: string | null;
@@ -98,6 +100,8 @@ export class OrdersService {
     private readonly repo: OrdersRepository,
     private readonly customersService: CustomersService,
     private readonly etaService: EtaService,
+    private readonly commissionSettlement: CommissionSettlementService,
+    private readonly deliveryFee: DeliveryFeeService,
   ) {}
 
   async listForCustomer(
@@ -396,7 +400,20 @@ export class OrdersService {
         sum + item.menuItem.price * item.quantity,
       0,
     );
-    const deliveryFee = 0.5;
+    const firstFoodId = cartItems[0]?.menuItem?.id;
+    const enterpriseId = firstFoodId
+      ? await this.repo.findEnterpriseIdByFirstFoodId(firstFoodId)
+      : null;
+    const deliveryFee = enterpriseId
+      ? (await this.deliveryFee.quoteForEnterprise({
+          enterpriseId,
+          deliveryInfo: {
+            address: deliveryInfo.address,
+            lat: deliveryInfo.lat,
+            lng: deliveryInfo.lng,
+          },
+        })).deliveryFee
+      : 0;
     const voucherDiscount = 0;
     const total = subtotal + deliveryFee - voucherDiscount;
 
@@ -414,10 +431,6 @@ export class OrdersService {
       paymentIntentId,
     });
 
-    const firstFoodId = cartItems[0]?.menuItem?.id;
-    const enterpriseId = firstFoodId
-      ? await this.repo.findEnterpriseIdByFirstFoodId(firstFoodId)
-      : null;
     if (enterpriseId) {
       await this.etaService
         .computeAndPersistForOrder({
@@ -436,6 +449,12 @@ export class OrdersService {
         () => undefined,
       );
     }
+
+    // Apply commission & settlement for COD orders too.
+    // Idempotent service: safe even if called again by other flows.
+    await this.commissionSettlement
+      .applyCommissionAndSettlement(order.OrderID)
+      .catch(() => undefined);
 
     // TODO: clear cart after order creation if needed
 

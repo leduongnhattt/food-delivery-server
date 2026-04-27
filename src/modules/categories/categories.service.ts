@@ -1,5 +1,9 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '@infra/prisma/prisma.service';
+import {
+  deleteKeysMatchingPattern,
+  getOrSetJson,
+} from '@infra/redis/redis.service';
 
 @Injectable()
 export class CategoriesService {
@@ -8,38 +12,43 @@ export class CategoriesService {
   async list(params: { enterpriseId?: string | undefined }) {
     const { enterpriseId } = params;
 
-    const categories = await this.prisma.foodCategory.findMany({
-      select: {
-        CategoryID: true,
-        CategoryName: true,
-        Description: true,
-        CreatedAt: true,
-        _count: {
-          select: {
-            foods: {
-              where: {
-                IsAvailable: true,
-                ...(enterpriseId ? { EnterpriseID: enterpriseId } : {}),
+    const cacheKey = `foodCategories:v1:list:${enterpriseId || 'all'}`;
+    const ttlSeconds = 60 * 60 * 6; // 6h
+
+    return getOrSetJson(cacheKey, ttlSeconds, async () => {
+      const categories = await this.prisma.foodCategory.findMany({
+        select: {
+          CategoryID: true,
+          CategoryName: true,
+          Description: true,
+          CreatedAt: true,
+          _count: {
+            select: {
+              foods: {
+                where: {
+                  IsAvailable: true,
+                  ...(enterpriseId ? { EnterpriseID: enterpriseId } : {}),
+                },
               },
             },
           },
         },
-      },
-      orderBy: { CategoryName: 'asc' },
-    });
+        orderBy: { CategoryName: 'asc' },
+      });
 
-    return {
-      categories: categories.map((cat) => ({
-        id: cat.CategoryID,
-        name: cat.CategoryName,
-        description: cat.Description || '',
-        foodCount: cat._count.foods,
-        createdAt: cat.CreatedAt
-          ? cat.CreatedAt.toISOString()
-          : new Date().toISOString(),
-      })),
-      total: categories.length,
-    };
+      return {
+        categories: categories.map((cat) => ({
+          id: cat.CategoryID,
+          name: cat.CategoryName,
+          description: cat.Description || '',
+          foodCount: cat._count.foods,
+          createdAt: cat.CreatedAt
+            ? cat.CreatedAt.toISOString()
+            : new Date().toISOString(),
+        })),
+        total: categories.length,
+      };
+    });
   }
 
   async create(params: {
@@ -81,6 +90,9 @@ export class CategoriesService {
         CreatedAt: true,
       },
     });
+
+    // Invalidate category lists (global + enterprise-specific variants)
+    await deleteKeysMatchingPattern('foodCategories:v1:list:*');
 
     return {
       success: true,
