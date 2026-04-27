@@ -9,6 +9,7 @@ import { PAYMENT_METHOD } from '@common/constants/payment-method.constants';
 import { formatVnpCreateDateCompact, sanitizeVnpOrderDescription } from '@modules/payments/vnpay/utils/vnpay-format.util';
 import { EtaService } from '@modules/shipping/eta.service';
 import { CommissionSettlementService } from '@modules/payments/commission-settlement/commission-settlement.service';
+import { DeliveryFeeService } from '@modules/shipping/delivery-fee.service';
 import {
   loadAccountCurrencyCode,
   loadEnterpriseDisplayNameFromFirstCartItem,
@@ -55,6 +56,7 @@ export class VnPayService {
     private readonly usdVndExchangeRate: UsdVndExchangeRateService,
     private readonly etaService: EtaService,
     private readonly commissionSettlement: CommissionSettlementService,
+    private readonly deliveryFee: DeliveryFeeService,
   ) { }
 
   private vnpAttemptKey(paymentId: string) {
@@ -85,18 +87,37 @@ export class VnPayService {
       this.prisma,
       dto,
     );
+
+    const enterpriseId = dto.cartItems?.[0]?.menuItem?.restaurantId || null;
+    const feeQuote = enterpriseId
+      ? await this.deliveryFee.quoteForEnterprise({
+          enterpriseId,
+          deliveryInfo: {
+            address: dto.deliveryInfo?.address,
+            lat: dto.deliveryInfo?.lat,
+            lng: dto.deliveryInfo?.lng,
+          },
+        })
+      : { deliveryFee: 0 };
+    const computedDeliveryFee = feeQuote.deliveryFee;
+    const subtotal = (dto.cartItems ?? []).reduce(
+      (sum, item) => sum + Number(item.menuItem.price) * Number(item.quantity ?? 0),
+      0,
+    );
+    const voucherDiscount = Math.max(0, subtotal + computedDeliveryFee - Number(dto.total));
+    const computedTotal = Math.max(0, subtotal + computedDeliveryFee - voucherDiscount);
+
     const { amountVnd, exchangeRateVndPerUsd, fxQuoteHost } =
       await this.computeVnpAmountVnd({
-        cartTotal: Number(dto.total),
+        cartTotal: Number(computedTotal),
         accountCurrency,
       });
     const paymentId = crypto.randomUUID();
-    const enterpriseId = dto.cartItems?.[0]?.menuItem?.restaurantId;
     const attempt: VnpPayAttempt = {
       paymentId,
       accountId,
       customerId,
-      dto,
+      dto: { ...dto, total: computedTotal },
       accountCurrency,
       amountVnd,
       exchangeRateVndPerUsd,

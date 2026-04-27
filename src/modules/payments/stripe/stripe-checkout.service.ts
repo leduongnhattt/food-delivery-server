@@ -4,6 +4,7 @@ import { PrismaService } from '@infra/prisma/prisma.service';
 import { StripeService } from '@infra/stripe/stripe.service';
 import type { CreateCheckoutSessionRequestDto } from '@modules/payments/dto';
 import { EtaService } from '@modules/shipping/eta.service';
+import { DeliveryFeeService } from '@modules/shipping/delivery-fee.service';
 import crypto from 'crypto';
 import { setKeyJson } from '@infra/redis/redis.service';
 
@@ -17,6 +18,7 @@ export class StripeCheckoutService {
         private readonly prisma: PrismaService,
         private readonly stripeService: StripeService,
         private readonly etaService: EtaService,
+        private readonly deliveryFee: DeliveryFeeService,
     ) { }
 
     private get stripe(): Stripe {
@@ -75,7 +77,10 @@ export class StripeCheckoutService {
     }
 
     /**
-     * Create a Stripe Checkout session with line items, optional commission fee, and optional voucher discount.
+     * Create a Stripe Checkout session with line items and optional voucher discount.
+     *
+     * Note: platform commission is a take-rate deducted from enterprise settlement,
+     * not a customer fee, so it MUST NOT be charged as a Stripe line item.
      */
     async createCheckoutSession(
         accountId: string,
@@ -104,30 +109,55 @@ export class StripeCheckoutService {
         }
 
         const customerEmail = await this.getAccountEmail(accountId);
-        const lineItems = this.buildLineItems(cartItems, currency);
-        const computedCommissionFee = await this.addCommissionLineItem(
-            cartItems,
-            lineItems,
-            currency,
+
+        const enterpriseId = cartItems[0]?.menuItem?.restaurantId || null;
+        const feeQuote = enterpriseId
+            ? await this.deliveryFee.quoteForEnterprise({
+                enterpriseId,
+                deliveryInfo: {
+                    address: deliveryInfo?.address,
+                    lat: deliveryInfo?.lat,
+                    lng: deliveryInfo?.lng,
+                },
+            })
+            : { deliveryFee: 0 };
+        const computedDeliveryFee = feeQuote.deliveryFee;
+
+        const subtotal = cartItems.reduce(
+            (sum, item) => sum + Number(item.menuItem.price) * Number(item.quantity ?? 0),
+            0,
         );
+        // Treat any difference between (subtotal + deliveryFee) and provided dto.total as voucher discount.
+        const voucherDiscount = Math.max(0, subtotal + computedDeliveryFee - Number(total));
+        const computedTotal = Math.max(0, subtotal + computedDeliveryFee - voucherDiscount);
+
+        const lineItems = this.buildLineItems(cartItems, currency);
+        if (computedDeliveryFee > 0) {
+            lineItems.push({
+                price_data: {
+                    currency,
+                    product_data: { name: 'Delivery Fee' },
+                    unit_amount: Math.round(computedDeliveryFee * 100),
+                },
+                quantity: 1,
+            });
+        }
         const discounts = await this.buildVoucherDiscount(
             voucherCode,
             lineItems,
-            computedCommissionFee,
-            total,
+            computedTotal,
             currency,
         );
 
         // Store attempt only; create Order/Payment only after Stripe confirms payment (paid).
         const attemptId = crypto.randomUUID();
-        const enterpriseId = cartItems[0]?.menuItem?.restaurantId || null;
         await setKeyJson(
             this.stripeAttemptKey(attemptId),
             {
                 attemptId,
                 accountId,
                 customerId: customer.CustomerID,
-                dto,
+                dto: { ...dto, total: computedTotal },
                 enterpriseId,
                 createdAtIso: new Date().toISOString(),
             },
@@ -151,11 +181,10 @@ export class StripeCheckoutService {
                 accountId,
                 attemptId,
                 itemCount: cartItems.length.toString(),
-                total: total.toString(),
+                total: computedTotal.toString(),
                 phone: deliveryInfo?.phone || '',
                 address: deliveryInfo?.address || '',
                 voucherCode: voucherCode || '',
-                commissionFee: computedCommissionFee.toString(),
             },
             customer_email: customerEmail,
         });
@@ -195,41 +224,9 @@ export class StripeCheckoutService {
         }));
     }
 
-    private async addCommissionLineItem(
-        cartItems: CreateCheckoutSessionRequestDto['cartItems'],
-        lineItems: Stripe.Checkout.SessionCreateParams.LineItem[],
-        currency: string,
-    ): Promise<number> {
-        let computedCommissionFee = 0;
-        const firstRestaurantId = cartItems[0]?.menuItem?.restaurantId;
-        if (firstRestaurantId) {
-            const enterprise = await this.prisma.enterprise.findFirst({
-                where: {
-                    EnterpriseID: firstRestaurantId,
-                    DeletedAt: null,
-                },
-                select: { CommissionRate: true },
-            });
-            const commissionRate = Number(enterprise?.CommissionRate ?? 0);
-            computedCommissionFee = commissionRate;
-        }
-        if (computedCommissionFee > 0) {
-            lineItems.push({
-                price_data: {
-                    currency,
-                    product_data: { name: 'Commission Fee' },
-                    unit_amount: Math.round(computedCommissionFee * 100),
-                },
-                quantity: 1,
-            });
-        }
-        return computedCommissionFee;
-    }
-
     private async buildVoucherDiscount(
         voucherCode: string | undefined,
         lineItems: Stripe.Checkout.SessionCreateParams.LineItem[],
-        _computedCommissionFee: number,
         total: number,
         currency: string,
     ): Promise<Stripe.Checkout.SessionCreateParams.Discount[] | undefined> {

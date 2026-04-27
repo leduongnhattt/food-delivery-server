@@ -32,9 +32,16 @@ import { EnterpriseIncomeController } from '@modules/enterprise/income/enterpris
 import { EnterpriseIncomeService } from '@modules/enterprise/income/enterprise-income.service';
 import { EnterpriseFinanceController } from '@modules/enterprise/finance/enterprise-finance.controller';
 import { EnterpriseFinanceService } from '@modules/enterprise/finance/enterprise-finance.service';
+import { CommissionSettlementModule } from '@modules/payments/commission-settlement/commission-settlement.module';
 
 @Module({
-  imports: [AuthModule, VouchersModule, ReviewsModule, EnterpriseActivationModule],
+  imports: [
+    AuthModule,
+    VouchersModule,
+    ReviewsModule,
+    EnterpriseActivationModule,
+    CommissionSettlementModule,
+  ],
   controllers: [
     EnterpriseAvatarController,
     EnterpriseCategoryController,

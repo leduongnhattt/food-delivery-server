@@ -6,9 +6,10 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '@infra/prisma/prisma.service';
 import { deleteKey, getKeyJson, setKeyJson } from '@infra/redis/redis.service';
-import { OrderStatus, PaymentStatus, Prisma } from '@prisma/client';
+import { OrderStatus, PaymentMethod, PaymentStatus, Prisma } from '@prisma/client';
 import { ORDER_STATUS } from '@common/constants/order-payment-status.constants';
 import { isEnterpriseTransitionAllowed } from '@modules/enterprise/orders/enterprise-order-status.transitions';
+import { CommissionSettlementService } from '@modules/payments/commission-settlement/commission-settlement.service';
 
 function isJsonObject(v: unknown): v is Prisma.JsonObject {
   return !!v && typeof v === 'object' && !Array.isArray(v);
@@ -227,12 +228,16 @@ const ENTERPRISE_SETTABLE_STATUSES: OrderStatus[] = [
   OrderStatus.ReadyForPickup,
   OrderStatus.OutForDelivery,
   OrderStatus.Delivered,
+  OrderStatus.Completed,
   OrderStatus.Cancelled,
 ];
 
 @Injectable()
 export class EnterpriseOrdersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly commissionSettlement: CommissionSettlementService,
+  ) { }
 
   private parseDeliveryMethod(body: {
     deliveryMethod?: unknown;
@@ -610,8 +615,68 @@ export class EnterpriseOrdersService {
         Status: target,
         Metadata: nextMeta,
       };
+
+      const hasAnyPayment = await tx.payment.findFirst({
+        where: { OrderID: orderId },
+        select: { PaymentID: true },
+      });
+
+      if (target === ORDER_STATUS.Confirmed && !hasAnyPayment) {
+        await tx.payment.create({
+          data: {
+            OrderID: orderId,
+            PaymentMethod: PaymentMethod.Cash,
+            PaymentStatus: PaymentStatus.Pending,
+            TransactionID: null,
+          },
+        });
+      }
+
       if (target === ORDER_STATUS.Delivered) {
         data.DeliveredAt = new Date();
+
+        // COD completion on delivery:
+        // Only do this when there is NO completed non-cash payment for the order.
+        const hasCompletedNonCash = await tx.payment.findFirst({
+          where: {
+            OrderID: orderId,
+            PaymentStatus: PaymentStatus.Completed,
+            NOT: { PaymentMethod: PaymentMethod.Cash },
+          },
+          select: { PaymentID: true },
+        });
+
+        if (!hasCompletedNonCash) {
+          const updated = await tx.payment.updateMany({
+            where: {
+              OrderID: orderId,
+              PaymentMethod: PaymentMethod.Cash,
+              PaymentStatus: PaymentStatus.Pending,
+            },
+            data: {
+              PaymentStatus: PaymentStatus.Completed,
+              PaymentDate: new Date(),
+            },
+          });
+
+          // Backfill safety: if cash payment does not exist yet, create as Completed.
+          if (updated.count === 0) {
+            const cashExists = await tx.payment.findFirst({
+              where: { OrderID: orderId, PaymentMethod: PaymentMethod.Cash },
+              select: { PaymentID: true },
+            });
+            if (!cashExists) {
+              await tx.payment.create({
+                data: {
+                  OrderID: orderId,
+                  PaymentMethod: PaymentMethod.Cash,
+                  PaymentStatus: PaymentStatus.Completed,
+                  TransactionID: null,
+                },
+              });
+            }
+          }
+        }
       }
       if (target === ORDER_STATUS.Cancelled) {
         await tx.payment.updateMany({
@@ -636,6 +701,17 @@ export class EnterpriseOrdersService {
     });
 
     await this.invalidateEnterpriseCaches(enterpriseId);
+
+    if (
+      result.status === ORDER_STATUS.Delivered ||
+      result.status === ORDER_STATUS.Completed
+    ) {
+      // Commission can be computed earlier, but settlement/payout should only be impacted
+      // once the order is delivered/completed.
+      await this.commissionSettlement
+        .applyCommissionAndSettlement(orderId)
+        .catch(() => undefined);
+    }
 
     return {
       success: true,

@@ -36,6 +36,8 @@ export interface RestaurantListItem {
 }
 
 export interface RestaurantDetailDto extends RestaurantListItem {
+  deliveryFee?: number;
+  distanceMeters?: number | null;
   foods: Array<{
     foodId: string;
     dishName: string;
@@ -173,14 +175,20 @@ export class RestaurantsService {
 
     const dest = await this.resolveDestination(destination);
     const origin = await this.resolveOriginFromEnterpriseRow(row);
-    const etaLabel =
+    const deliveryInfo =
       origin && dest
-        ? await this.computeDeliveryTimeLabel({ origin, destination: dest })
+        ? await this.computeDeliveryTimeAndDistance({ origin, destination: dest })
         : null;
 
-    const base = this.mapRowToListItem(row, etaLabel);
+    const base = this.mapRowToListItem(row, deliveryInfo?.label ?? null);
     return {
       ...base,
+      ...(deliveryInfo
+        ? {
+            deliveryFee: deliveryInfo.deliveryFee,
+            distanceMeters: deliveryInfo.distanceMeters,
+          }
+        : {}),
       foods,
       reviews,
     };
@@ -501,5 +509,94 @@ export class RestaurantsService {
     const hi = clamped + 5;
     const label = `${lo}-${hi} min`;
     return label;
+  }
+
+  private computeDeliveryFeeFromDistanceMeters(distanceMeters: number | null): number {
+    const baseFeeRaw = Number(process.env.DELIVERY_FEE_BASE);
+    const perKmFeeRaw = Number(process.env.DELIVERY_FEE_PER_KM);
+    const minFeeRaw = Number(process.env.DELIVERY_FEE_MIN);
+    const maxFeeRaw = Number(process.env.DELIVERY_FEE_MAX);
+
+    const baseFee = Number.isFinite(baseFeeRaw) && baseFeeRaw >= 0 ? baseFeeRaw : 0.5;
+    const perKmFee = Number.isFinite(perKmFeeRaw) && perKmFeeRaw >= 0 ? perKmFeeRaw : 0.2;
+    const minFee = Number.isFinite(minFeeRaw) && minFeeRaw >= 0 ? minFeeRaw : 0.5;
+    const maxFee = Number.isFinite(maxFeeRaw) && maxFeeRaw >= 0 ? maxFeeRaw : 5.0;
+
+    const meters =
+      typeof distanceMeters === 'number' &&
+      Number.isFinite(distanceMeters) &&
+      distanceMeters > 0
+        ? distanceMeters
+        : null;
+    const km = meters != null ? meters / 1000 : 0;
+    const billedKm = meters != null ? Math.max(1, Math.ceil(km)) : 0;
+
+    const raw = baseFee + perKmFee * billedKm;
+    const clamped = Math.max(minFee, Math.min(maxFee, raw));
+    return Math.round(clamped * 100) / 100;
+  }
+
+  private async computeDeliveryTimeAndDistance(params: {
+    origin: LatLng;
+    destination: LatLng;
+  }): Promise<{ label: string; distanceMeters: number; durationSeconds: number; deliveryFee: number } | null> {
+    const origin = this.toLatLng(params.origin);
+    const destination = this.toLatLng(params.destination);
+    if (!origin || !destination) return null;
+
+    const o = { lat: this.roundCoord(origin.lat), lng: this.roundCoord(origin.lng) };
+    const d = { lat: this.roundCoord(destination.lat), lng: this.roundCoord(destination.lng) };
+    const cacheKey = `geo:mx:driving:${o.lng},${o.lat}:${d.lng},${d.lat}`;
+
+    const cached = await getKeyJson<{ durationSeconds: number; distanceMeters?: number }>(cacheKey);
+    const durationSeconds =
+      cached && typeof cached.durationSeconds === 'number' && Number.isFinite(cached.durationSeconds)
+        ? cached.durationSeconds
+        : null;
+    const cachedDistanceMeters =
+      cached && typeof cached.distanceMeters === 'number' && Number.isFinite(cached.distanceMeters)
+        ? cached.distanceMeters
+        : null;
+
+    const r =
+      durationSeconds != null
+        ? { durationSeconds, distanceMeters: cachedDistanceMeters ?? 0 }
+        : await this.mapbox.matrixDuration({ origin, destination, profile: 'driving' });
+
+    if (!r) return null;
+    await setKeyJson(cacheKey, r, DELIVERY_TIME_CACHE_TTL_SECONDS);
+
+    const basePrepMinutesRaw = Number(process.env.ETA_BASE_PREP_MINUTES);
+    const basePrepMinutes =
+      Number.isFinite(basePrepMinutesRaw) && basePrepMinutesRaw >= 0
+        ? Math.round(basePrepMinutesRaw)
+        : DEFAULT_BASE_PREP_MINUTES;
+
+    const travelMinutes = Math.max(1, Math.ceil(r.durationSeconds / 60));
+    const totalMinutes = basePrepMinutes + travelMinutes;
+
+    const minMinutesRaw = Number(process.env.ETA_MIN_MINUTES);
+    const maxMinutesRaw = Number(process.env.ETA_MAX_MINUTES);
+    const minMinutes =
+      Number.isFinite(minMinutesRaw) && minMinutesRaw > 0
+        ? Math.round(minMinutesRaw)
+        : DEFAULT_MIN_DELIVERY_MINUTES;
+    const maxMinutes =
+      Number.isFinite(maxMinutesRaw) && maxMinutesRaw > 0
+        ? Math.round(maxMinutesRaw)
+        : DEFAULT_MAX_DELIVERY_MINUTES;
+
+    const distanceMeters = Number.isFinite(r.distanceMeters) ? r.distanceMeters : 0;
+    if (distanceMeters > 0 && distanceMeters <= 20_000 && totalMinutes > 180) {
+      return null;
+    }
+
+    const clamped = Math.max(minMinutes, Math.min(maxMinutes, totalMinutes));
+    const lo = Math.max(5, clamped - 5);
+    const hi = clamped + 5;
+    const label = `${lo}-${hi} min`;
+    const deliveryFee = this.computeDeliveryFeeFromDistanceMeters(distanceMeters);
+
+    return { label, distanceMeters, durationSeconds: r.durationSeconds, deliveryFee };
   }
 }

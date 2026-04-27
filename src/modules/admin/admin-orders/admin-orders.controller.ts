@@ -1,12 +1,11 @@
-import { Controller, Get, Query, Param } from '@nestjs/common';
+import { Controller, Get, Query, Param, Delete } from '@nestjs/common';
 import { AdminOrdersService } from './admin-orders.service';
-import { OrderStatus, PaymentMethod } from '@prisma/client';
+import { OrderStatus, PaymentMethod, PaymentStatus } from '@prisma/client';
 
 @Controller('admin/orders')
 export class AdminOrdersController {
-  constructor(private readonly service: AdminOrdersService) {}
+  constructor(private readonly service: AdminOrdersService) { }
 
-  // Danh sách orders (cursor pagination + filter)
   @Get()
   async list(
     @Query('orderId') orderId?: string,
@@ -14,6 +13,7 @@ export class AdminOrdersController {
     @Query('buyerSearch') buyerSearch?: string,
     @Query('status') status?: string,
     @Query('paymentMethod') paymentMethod?: string,
+    @Query('paymentStatus') paymentStatus?: string,
     @Query('fromDate') fromDate?: string,
     @Query('toDate') toDate?: string,
     @Query('limit') limit?: string,
@@ -27,6 +27,7 @@ export class AdminOrdersController {
       status: status as OrderStatus,
 
       paymentMethod: paymentMethod as PaymentMethod,
+      paymentStatus: paymentStatus as PaymentStatus,
 
       fromDate: fromDate ? new Date(fromDate) : undefined,
       toDate: toDate ? new Date(toDate) : undefined,
@@ -36,9 +37,13 @@ export class AdminOrdersController {
     });
   }
 
-  // Chi tiết order
   @Get(':orderId')
   async getDetail(@Param('orderId') orderId: string) {
     return this.service.getOrderById(orderId);
+  }
+
+  @Delete(':orderId')
+  async deleteOrder(@Param('orderId') orderId: string) {
+    return this.service.deleteOrder(orderId);
   }
 }
