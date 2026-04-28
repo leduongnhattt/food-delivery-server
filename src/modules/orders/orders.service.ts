@@ -14,6 +14,8 @@ import { EtaService } from '@modules/shipping/eta.service';
 import { invalidateEnterpriseOrderCaches } from '@modules/enterprise/orders/enterprise-order-cache.util';
 import { CommissionSettlementService } from '@modules/payments/commission-settlement/commission-settlement.service';
 import { DeliveryFeeService } from '@modules/shipping/delivery-fee.service';
+import { RabbitMqService } from '@infra/rabbitmq/rabbitmq.service';
+import crypto from 'crypto';
 
 type FoodWithImageURL = {
   ImageURL?: string | null;
@@ -102,6 +104,7 @@ export class OrdersService {
     private readonly etaService: EtaService,
     private readonly commissionSettlement: CommissionSettlementService,
     private readonly deliveryFee: DeliveryFeeService,
+    private readonly rabbit: RabbitMqService,
   ) {}
 
   async listForCustomer(
@@ -448,6 +451,16 @@ export class OrdersService {
       await invalidateEnterpriseOrderCaches(enterpriseId).catch(
         () => undefined,
       );
+
+      // Publish an async event for enterprise notifications (best-effort).
+      this.rabbit.publishEnterpriseOrderCreated({
+        eventId: crypto.randomUUID(),
+        orderId: order.OrderID,
+        enterpriseId,
+        createdAt: new Date().toISOString(),
+        customerName: customer.FullName ?? undefined,
+        totalAmount: Number(order.TotalAmount),
+      });
     }
 
     // Apply commission & settlement for COD orders too.

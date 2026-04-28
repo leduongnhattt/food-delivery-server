@@ -18,6 +18,12 @@ import {
   SUPPORT_ROUTING_ADMIN_REPLIED,
 } from './support-events.constants';
 import type { SupportAdminRepliedPayload } from './support-admin-replied.payload';
+import {
+  ORDERS_EXCHANGE,
+  ORDERS_QUEUE_NOTIFICATIONS,
+  ORDERS_ROUTING_ENTERPRISE_ORDER_CREATED,
+} from './orders-events.constants';
+import type { EnterpriseOrderCreatedPayload } from './enterprise-order-created.payload';
 
 @Injectable()
 export class RabbitMqService implements OnModuleInit, OnModuleDestroy {
@@ -25,6 +31,9 @@ export class RabbitMqService implements OnModuleInit, OnModuleDestroy {
   private connection: ChannelModel | null = null;
   private channel: Channel | null = null;
   private ready = false;
+  private ordersCreatedHandler:
+    | ((payload: EnterpriseOrderCreatedPayload) => Promise<void> | void)
+    | null = null;
 
   constructor(private readonly mail: MailService) {}
 
@@ -41,6 +50,7 @@ export class RabbitMqService implements OnModuleInit, OnModuleDestroy {
       this.connection = conn;
       const ch = await conn.createChannel();
       this.channel = ch;
+      // Support email notification consumer
       await ch.assertExchange(SUPPORT_EXCHANGE, 'topic', { durable: true });
       await ch.assertQueue(SUPPORT_QUEUE_NOTIFICATIONS, { durable: true });
       await ch.bindQueue(
@@ -48,17 +58,17 @@ export class RabbitMqService implements OnModuleInit, OnModuleDestroy {
         SUPPORT_EXCHANGE,
         SUPPORT_ROUTING_ADMIN_REPLIED,
       );
-
       await ch.consume(
         SUPPORT_QUEUE_NOTIFICATIONS,
-        (msg) => {
-          void this.handleMessage(ch, msg);
-        },
+        (msg) => void this.handleSupportMessage(ch, msg),
         { noAck: false },
       );
 
+      // Orders notification consumer (enterprise new order)
+      await this.ensureOrdersConsumerWired(ch);
+
       this.ready = true;
-      this.logger.log('RabbitMQ connected; support notification consumer ready');
+      this.logger.log('RabbitMQ connected; consumers ready');
     } catch (e) {
       this.logger.error('RabbitMQ init failed', e);
     }
@@ -85,7 +95,33 @@ export class RabbitMqService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  private async handleMessage(
+  publishEnterpriseOrderCreated(payload: EnterpriseOrderCreatedPayload): void {
+    if (!this.channel || !this.ready) {
+      this.logger.warn('RabbitMQ not ready; skipping publish');
+      return;
+    }
+    const buf = Buffer.from(JSON.stringify(payload), 'utf8');
+    this.channel.publish(
+      ORDERS_EXCHANGE,
+      ORDERS_ROUTING_ENTERPRISE_ORDER_CREATED,
+      buf,
+      {
+        persistent: true,
+        contentType: 'application/json',
+      },
+    );
+  }
+
+  onEnterpriseOrderCreated(
+    handler: (payload: EnterpriseOrderCreatedPayload) => Promise<void> | void,
+  ): void {
+    this.ordersCreatedHandler = handler;
+    if (this.channel && this.ready) {
+      void this.ensureOrdersConsumerWired(this.channel);
+    }
+  }
+
+  private async handleSupportMessage(
     ch: Channel,
     msg: ConsumeMessage | null,
   ): Promise<void> {
@@ -125,6 +161,44 @@ export class RabbitMqService implements OnModuleInit, OnModuleDestroy {
       }
     } catch (e) {
       this.logger.error('support notification consume failed', e);
+      ch.nack(msg, false, true);
+    }
+  }
+
+  private async ensureOrdersConsumerWired(ch: Channel): Promise<void> {
+    await ch.assertExchange(ORDERS_EXCHANGE, 'topic', { durable: true });
+    await ch.assertQueue(ORDERS_QUEUE_NOTIFICATIONS, { durable: true });
+    await ch.bindQueue(
+      ORDERS_QUEUE_NOTIFICATIONS,
+      ORDERS_EXCHANGE,
+      ORDERS_ROUTING_ENTERPRISE_ORDER_CREATED,
+    );
+    // Only start consuming when a handler is registered.
+    if (!this.ordersCreatedHandler) return;
+    await ch.consume(
+      ORDERS_QUEUE_NOTIFICATIONS,
+      (msg) => void this.handleOrdersCreated(ch, msg),
+      { noAck: false },
+    );
+  }
+
+  private async handleOrdersCreated(
+    ch: Channel,
+    msg: ConsumeMessage | null,
+  ): Promise<void> {
+    if (!msg) return;
+    try {
+      const raw = msg.content.toString('utf8');
+      const payload = JSON.parse(raw) as EnterpriseOrderCreatedPayload;
+      if (!this.ordersCreatedHandler) {
+        // consumer exists but handler missing (should be rare); retry later
+        ch.nack(msg, false, true);
+        return;
+      }
+      await this.ordersCreatedHandler(payload);
+      ch.ack(msg);
+    } catch (e) {
+      this.logger.error('orders.enterprise.created consume failed', e);
       ch.nack(msg, false, true);
     }
   }
