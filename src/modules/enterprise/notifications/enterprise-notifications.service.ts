@@ -15,6 +15,18 @@ type ListOptions = {
   limit: number;
 };
 
+const orderPreviewSelect = {
+  OrderID: true,
+  TotalAmount: true,
+  customer: { select: { FullName: true, account: { select: { Username: true } } } },
+  orderDetails: {
+    take: 3,
+    select: { Quantity: true, food: { select: { DishName: true } } },
+  },
+} as const;
+
+type OrderPreviewRow = Prisma.OrderGetPayload<{ select: typeof orderPreviewSelect }>;
+
 function isJsonObject(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === 'object' && !Array.isArray(v);
 }
@@ -90,24 +102,16 @@ export class EnterpriseNotificationsService implements OnModuleInit {
       )
       .filter((x): x is string => !!x);
     const uniqueOrderIds = Array.from(new Set(orderIds));
-    const ordersById = uniqueOrderIds.length
+    const ordersById: Map<string, OrderPreviewRow> = uniqueOrderIds.length
       ? new Map(
           (
             await this.prisma.order.findMany({
               where: { OrderID: { in: uniqueOrderIds } },
-              select: {
-                OrderID: true,
-                TotalAmount: true,
-                customer: { select: { FullName: true, account: { select: { Username: true } } } },
-                orderDetails: {
-                  take: 3,
-                  select: { Quantity: true, food: { select: { DishName: true } } },
-                },
-              },
+              select: orderPreviewSelect,
             })
           ).map((orderRow) => [orderRow.OrderID, orderRow] as const),
         )
-      : new Map();
+      : new Map<string, OrderPreviewRow>();
 
     const notifications = notificationRows.map((notificationRow) => {
       // Never display raw IDs in notification text.
