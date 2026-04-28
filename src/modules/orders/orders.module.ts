@@ -8,6 +8,7 @@ import { AuthModule } from '@modules/auth/auth.module';
 import { ShippingModule } from '@modules/shipping/shipping.module';
 import { ReturnsService } from '@modules/orders/returns/returns.service';
 import { CommissionSettlementModule } from '@modules/payments/commission-settlement/commission-settlement.module';
+import { RabbitMqModule } from '@infra/rabbitmq/rabbitmq.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { CommissionSettlementModule } from '@modules/payments/commission-settlem
     AuthModule,
     ShippingModule,
     CommissionSettlementModule,
+    RabbitMqModule,
   ],
   providers: [OrdersService, OrdersRepository, ReturnsService],
   controllers: [OrdersController],

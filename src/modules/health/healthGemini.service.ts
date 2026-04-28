@@ -1,3 +1,6 @@
+import { Injectable } from '@nestjs/common';
+import { HealthAiHttpService } from '@modules/health/healthAiHttp.service';
+
 type SupportedLocale = 'en' | 'vi';
 
 function getSystemLocale(): SupportedLocale {
@@ -12,11 +15,11 @@ export interface HealthProfileDto {
   weight: number;
   activityLevel: 'sedentary' | 'light' | 'moderate' | 'active' | 'very-active';
   healthGoal:
-    | 'weight-loss'
-    | 'weight-gain'
-    | 'muscle-gain'
-    | 'maintenance'
-    | 'health-improvement';
+  | 'weight-loss'
+  | 'weight-gain'
+  | 'muscle-gain'
+  | 'maintenance'
+  | 'health-improvement';
   dietaryRestrictions?: string;
 }
 
@@ -267,21 +270,43 @@ Schema:
 }`;
 }
 
+@Injectable()
 export class HealthGeminiService {
+  constructor(private readonly healthAiHttp: HealthAiHttpService) { }
+
   private readonly modelsToTry = [
-    'gemini-2.5-flash',
-    'gemini-1.5-flash-latest',
-    'gemini-1.5-pro-latest',
+    // NOTE: Gemini model aliases change over time; prefer stable names.
+    'gemini-2.0-flash',
+    'gemini-1.5-flash',
+    'gemini-1.5-pro',
   ] as const;
 
   async analyze(profile: HealthProfileDto): Promise<GeminiHealthAnalysisDto> {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      throw new Error('GEMINI_API_KEY is missing. Cannot generate AI content.');
+    const errors: string[] = [];
+
+    // Prefer calling health-ai-service first (same contract/shape), then fallback to Gemini.
+    if (this.healthAiHttp.isEnabled()) {
+      try {
+        return await this.healthAiHttp.recommend(profile);
+      } catch (e) {
+        errors.push(e instanceof Error ? e.message : String(e));
+      }
     }
 
     const locale = getSystemLocale();
     const prompt = buildPrompt(locale, profile);
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      if (errors.length > 0) {
+        throw new Error(
+          `health-ai-service failed (${errors.join(
+            ' | ',
+          )}) and GEMINI_API_KEY is missing. Cannot fallback to Gemini.`,
+        );
+      }
+      throw new Error('GEMINI_API_KEY is missing. Cannot generate AI content.');
+    }
 
     let lastError: string | null = null;
     for (const model of this.modelsToTry) {
@@ -295,7 +320,11 @@ export class HealthGeminiService {
       }
     }
 
-    throw new Error(lastError || 'All Gemini models failed to generate content.');
+    throw new Error(
+      [errors.length ? `health-ai-service failed: ${errors.join(' | ')}` : null, lastError]
+        .filter(Boolean)
+        .join(' | ') || 'All Gemini models failed to generate content.',
+    );
   }
 
   private async generateContent(

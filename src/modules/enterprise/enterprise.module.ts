@@ -33,6 +33,9 @@ import { EnterpriseIncomeService } from '@modules/enterprise/income/enterprise-i
 import { EnterpriseFinanceController } from '@modules/enterprise/finance/enterprise-finance.controller';
 import { EnterpriseFinanceService } from '@modules/enterprise/finance/enterprise-finance.service';
 import { CommissionSettlementModule } from '@modules/payments/commission-settlement/commission-settlement.module';
+import { EnterpriseNotificationsController } from '@modules/enterprise/notifications/enterprise-notifications.controller';
+import { EnterpriseNotificationsService } from '@modules/enterprise/notifications/enterprise-notifications.service';
+import { RabbitMqModule } from '@infra/rabbitmq/rabbitmq.module';
 
 @Module({
   imports: [
@@ -41,6 +44,7 @@ import { CommissionSettlementModule } from '@modules/payments/commission-settlem
     ReviewsModule,
     EnterpriseActivationModule,
     CommissionSettlementModule,
+    RabbitMqModule,
   ],
   controllers: [
     EnterpriseAvatarController,
@@ -60,6 +64,7 @@ import { CommissionSettlementModule } from '@modules/payments/commission-settlem
     EnterpriseVoucherController,
     EnterpriseLocalUploadController,
     EnterpriseReviewsController,
+    EnterpriseNotificationsController,
   ],
   providers: [
     EnterpriseCategoryService,
@@ -74,6 +79,7 @@ import { CommissionSettlementModule } from '@modules/payments/commission-settlem
     EnterpriseIncomeService,
     EnterpriseFinanceService,
     EnterpriseVoucherService,
+    EnterpriseNotificationsService,
   ],
 })
 export class EnterpriseModule {}

@@ -111,8 +111,11 @@ This project reads `.env` from the project root (it is loaded even when running 
   - `STRIPE_SECRET_KEY`
   - `STRIPE_WEBHOOK_SECRET`
   - `APP_URL`: frontend base URL for checkout success/cancel redirects
-- **Gemini (Health AI)**
-  - `GEMINI_API_KEY`
+- **Health AI**
+  - `HEALTH_AI_BASE_URL`: base URL for `health-ai-service` (FastAPI) (default `http://127.0.0.1:8000`)
+  - `HEALTH_AI_TIMEOUT_MS`: timeout for `POST /recommend` (default `90000`)
+  - `HEALTH_AI_ENABLED`: enable calling health-ai-service first (`true`/`false`, default `true`)
+  - `GEMINI_API_KEY`: fallback key (used if health-ai-service fails)
 
 > Note: **Do not commit** `.env` to git. If secrets were ever committed/pushed, rotate them immediately.
 
