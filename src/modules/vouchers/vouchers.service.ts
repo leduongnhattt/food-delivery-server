@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@infra/prisma/prisma.service';
+import { VoucherStatus } from '@prisma/client';
 import {
   deleteKey,
   deleteKeysMatchingPattern,
@@ -42,7 +43,7 @@ export class VouchersService {
     const voucher = await this.prisma.voucher.findFirst({
       where: {
         Code: trimmed,
-        Status: 'Approved',
+        Status: VoucherStatus.Approved,
         OR: [{ ExpiryDate: null }, { ExpiryDate: { gt: new Date() } }],
       },
       select: {
@@ -64,7 +65,7 @@ export class VouchersService {
 
     const rows = await this.prisma.voucher.findMany({
       where: {
-        Status: 'Approved',
+        Status: VoucherStatus.Approved,
         OR: [{ ExpiryDate: null }, { ExpiryDate: { gt: new Date() } }],
       },
       orderBy: { CreatedAt: 'desc' },
