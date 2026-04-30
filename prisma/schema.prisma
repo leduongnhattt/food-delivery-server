@@ -907,6 +907,7 @@ enum VoucherStatus {
   Pending
   Approved
   Rejected
+  Expired
 }
 
 enum OrderStatus {

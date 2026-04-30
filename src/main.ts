@@ -2,6 +2,8 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from '@src/app.module';
 import { config as loadEnv } from 'dotenv';
 import { resolve } from 'path';
+import { AuditLogInterceptor } from '@common/interceptors';
+import { PrismaService } from '@infra/prisma/prisma.service';
 
 async function bootstrap() {
   // Load .env from project root (works when running from any cwd or from dist/)
@@ -10,6 +12,7 @@ async function bootstrap() {
   });
   const app = await NestFactory.create(AppModule);
   app.setGlobalPrefix('api');
+  app.useGlobalInterceptors(new AuditLogInterceptor(app.get(PrismaService)));
 
   const corsOrigin = process.env.CORS_ORIGIN;
   const allowedOrigins = corsOrigin

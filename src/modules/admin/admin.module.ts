@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AdminAuditLogsModule } from './admin-audit-logs/admin-audit-logs.module';
 import { AdminCustomersModule } from './admin-customers/admin-customers.module';
 import { AdminDashboardModule } from './admin-dashboard/admin-dashboard.module';
 import { AdminEnterprisesModule } from './admin-enterprises/admin-enterprises.module';
@@ -18,6 +19,7 @@ import { AdminTransactionFeesModule } from '@modules/admin/admin-transaction-fee
  */
 @Module({
   imports: [
+    AdminAuditLogsModule,
     AdminDashboardModule,
     AdminCustomersModule,
     AdminEnterprisesModule,
