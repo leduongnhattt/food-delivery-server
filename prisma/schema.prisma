@@ -177,6 +177,7 @@ model Enterprise {
   returnRequests               ReturnRequest[]
   payoutRequests               EnterprisePayoutRequest[]
   ledgerEntries                EnterpriseLedgerEntry[]
+  notifications                EnterpriseNotification[]
 
   @@index([AccountID])
   @@index([EnterpriseName])
@@ -184,6 +185,28 @@ model Enterprise {
   @@index([DeletedAt])
   @@fulltext([EnterpriseName, Description])
   @@map("ENTERPRISE")
+}
+
+enum EnterpriseNotificationType {
+  ORDER_CREATED
+}
+
+model EnterpriseNotification {
+  NotificationID String                     @id @default(uuid()) @db.VarChar(36)
+  EnterpriseID   String                     @db.VarChar(36)
+  Type           EnterpriseNotificationType
+  Title          String                     @db.VarChar(255)
+  Body           String?                    @db.Text
+  Data           Json?
+  ReadAt         DateTime?
+  CreatedAt      DateTime                   @default(now())
+  EventID        String                     @unique @db.VarChar(36)
+
+  enterprise Enterprise @relation(fields: [EnterpriseID], references: [EnterpriseID], onDelete: Cascade)
+
+  @@index([EnterpriseID, CreatedAt], map: "ENT_NOTI_ent_created_idx")
+  @@index([EnterpriseID, ReadAt], map: "ENT_NOTI_ent_read_idx")
+  @@map("ENTERPRISE_NOTIFICATION")
 }
 
 model Admin {
@@ -884,6 +907,7 @@ enum VoucherStatus {
   Pending
   Approved
   Rejected
+  Expired
 }
 
 enum OrderStatus {

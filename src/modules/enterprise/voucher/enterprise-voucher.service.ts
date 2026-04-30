@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '@infra/prisma/prisma.service';
 import { VouchersService } from '@modules/vouchers/vouchers.service';
+import { VoucherStatus } from '@prisma/client';
 
 export interface CreateEnterpriseVoucherDto {
   Code: string;
@@ -32,7 +33,7 @@ export class EnterpriseVoucherService {
   }
 
   private async invalidateIfApproved(status: string | null | undefined) {
-    if (status === 'Approved') {
+    if (status === VoucherStatus.Approved) {
       await this.vouchersService.invalidateApprovedListCache();
     }
   }

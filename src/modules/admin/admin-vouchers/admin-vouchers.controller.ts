@@ -14,12 +14,13 @@ import { CurrentAccount } from '@common/decorators';
 import type { JwtPayload } from '@modules/auth/auth.service';
 import {
   AdminCreateVoucherBody,
+  AdminUpdateVoucherBody,
   AdminVouchersService,
 } from './admin-vouchers.service';
 
 @Controller('admin')
 export class AdminVouchersController {
-  constructor(private readonly adminVouchersService: AdminVouchersService) {}
+  constructor(private readonly adminVouchersService: AdminVouchersService) { }
 
   @Get('vouchers')
   @UseGuards(JwtAuthGuard, AdminRoleGuard)
@@ -27,13 +28,33 @@ export class AdminVouchersController {
     @CurrentAccount() account: JwtPayload | null,
     @Query('status') status?: string,
     @Query('q') q?: string,
+    @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('range') range?: string,
   ) {
     if (!account?.accountId) {
       throw new UnauthorizedException('Unauthorized');
     }
-    const query = this.adminVouchersService.parseListQuery({ status, q, limit });
+    const query = this.adminVouchersService.parseListQuery({
+      status,
+      q,
+      page,
+      limit,
+      range,
+    });
     return this.adminVouchersService.listVouchers(query);
+  }
+
+  @Get('vouchers/:voucherId')
+  @UseGuards(JwtAuthGuard, AdminRoleGuard)
+  getDetail(
+    @CurrentAccount() account: JwtPayload | null,
+    @Param('voucherId') voucherId: string,
+  ) {
+    if (!account?.accountId) {
+      throw new UnauthorizedException('Unauthorized');
+    }
+    return this.adminVouchersService.getVoucherDetail(voucherId);
   }
 
   @Post('voucher')
@@ -58,5 +79,30 @@ export class AdminVouchersController {
       throw new UnauthorizedException('Unauthorized');
     }
     return this.adminVouchersService.approveVoucher(voucherId);
+  }
+
+  @Patch('vouchers/:voucherId/reject')
+  @UseGuards(JwtAuthGuard, AdminRoleGuard)
+  reject(
+    @CurrentAccount() account: JwtPayload | null,
+    @Param('voucherId') voucherId: string,
+  ) {
+    if (!account?.accountId) {
+      throw new UnauthorizedException('Unauthorized');
+    }
+    return this.adminVouchersService.rejectVoucher(voucherId);
+  }
+
+  @Patch('vouchers/:voucherId')
+  @UseGuards(JwtAuthGuard, AdminRoleGuard)
+  update(
+    @CurrentAccount() account: JwtPayload | null,
+    @Param('voucherId') voucherId: string,
+    @Body() body: AdminUpdateVoucherBody,
+  ) {
+    if (!account?.accountId) {
+      throw new UnauthorizedException('Unauthorized');
+    }
+    return this.adminVouchersService.updateVoucher(voucherId, body);
   }
 }

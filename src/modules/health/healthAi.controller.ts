@@ -4,7 +4,7 @@ import {
   type HealthProfileDto,
 } from '@modules/health/healthGemini.service';
 
-type HealthGeminiAnalyzeResponse =
+type HealthAiAnalyzeResponse =
   | { success: true; data: import('./healthGemini.service').GeminiHealthAnalysisDto }
   | { success: false; error: string };
 
@@ -35,10 +35,10 @@ function isValidHealthGoal(x: unknown): x is HealthProfileDto['healthGoal'] {
 }
 
 @Controller('health')
-export class HealthGeminiController {
-  constructor(private readonly healthGemini: HealthGeminiService) {}
+export class HealthAiController {
+  constructor(private readonly healthAi: HealthGeminiService) {}
 
-  @Post('gemini-analyze')
+  @Post('ai-analyze')
   async analyze(
     @Body()
     body: {
@@ -50,7 +50,7 @@ export class HealthGeminiController {
       healthGoal?: string;
       dietaryRestrictions?: string;
     },
-  ): Promise<HealthGeminiAnalyzeResponse> {
+  ): Promise<HealthAiAnalyzeResponse> {
     const { age, gender, height, weight, activityLevel, healthGoal } = body ?? {};
 
     if (
@@ -94,7 +94,7 @@ export class HealthGeminiController {
     };
 
     try {
-      const data = await this.healthGemini.analyze(profile);
+      const data = await this.healthAi.analyze(profile);
       return { success: true, data };
     } catch (e) {
       const error = e instanceof Error ? e.message : String(e);
