@@ -5,10 +5,10 @@ import {
   NestInterceptor,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import { Observable } from 'rxjs';
-import { catchError, finalize } from 'rxjs/operators';
+import { Observable, tap } from 'rxjs';
 import { PrismaService } from '@infra/prisma/prisma.service';
 import type { JwtPayload } from '@modules/auth/auth.service';
+import type { Prisma } from '@prisma/client';
 
 type RequestWithAccount = Request & { account?: JwtPayload; user?: JwtPayload };
 
@@ -29,22 +29,27 @@ function normalizeIp(req: Request): string | null {
     typeof xff === 'string'
       ? xff.split(',')[0]?.trim()
       : Array.isArray(xff)
-        ? String(xff[0] || '').split(',')[0]?.trim()
+        ? String(xff[0] || '')
+            .split(',')[0]
+            ?.trim()
         : '';
-  const raw = first || req.ip || (req.socket as any)?.remoteAddress || '';
+  const raw = first || req.ip || req.socket.remoteAddress || '';
   const normalized = normalizeIpString(raw);
   return normalized || null;
 }
 
 function safeJsonClone(v: unknown): unknown {
   try {
-    return JSON.parse(JSON.stringify(v));
+    return JSON.parse(JSON.stringify(v)) as unknown;
   } catch {
     return null;
   }
 }
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
 
-function redactSecrets(value: unknown): unknown {
+function redactSecrets(value: unknown): Prisma.InputJsonValue | undefined {
   const cloned = safeJsonClone(value);
   const deny = new Set([
     'password',
@@ -57,16 +62,27 @@ function redactSecrets(value: unknown): unknown {
     'set-cookie',
   ]);
 
-  const walk = (node: any): any => {
-    if (!node || typeof node !== 'object') return node;
-    if (Array.isArray(node)) return node.map(walk);
-    const out: any = {};
-    for (const [k, v] of Object.entries(node)) {
-      if (deny.has(String(k).toLowerCase())) {
-        out[k] = '[REDACTED]';
-      } else {
-        out[k] = walk(v);
+  const walk = (node: unknown): Prisma.InputJsonValue | undefined => {
+    if (node === null || node === undefined) return undefined;
+    if (typeof node !== 'object') return node as Prisma.InputJsonValue;
+    if (Array.isArray(node)) {
+      const arr: Prisma.InputJsonValue[] = [];
+      for (const item of node) {
+        const walked = walk(item);
+        if (walked !== undefined) arr.push(walked);
       }
+      return arr;
+    }
+    if (!isRecord(node)) return undefined;
+    const out: Record<string, Prisma.InputJsonValue> = {};
+    for (const [k, v] of Object.entries(node)) {
+      const key = String(k);
+      if (deny.has(key.toLowerCase())) {
+        out[key] = '[REDACTED]';
+        continue;
+      }
+      const walked = walk(v);
+      if (walked !== undefined) out[key] = walked;
     }
     return out;
   };
@@ -91,8 +107,16 @@ function entityTypeFromPath(path: string): string {
   return 'admin';
 }
 
-function guessEntityId(params: Record<string, any>): string | null {
-  const keys = ['id', 'orderId', 'enterpriseId', 'ticketId', 'invitationId', 'voucherId', 'ruleId'];
+function guessEntityId(params: Record<string, unknown>): string | null {
+  const keys = [
+    'id',
+    'orderId',
+    'enterpriseId',
+    'ticketId',
+    'invitationId',
+    'voucherId',
+    'ruleId',
+  ];
   for (const k of keys) {
     const v = params?.[k];
     if (typeof v === 'string' && v.trim()) return v.trim();
@@ -104,12 +128,12 @@ function guessEntityId(params: Record<string, any>): string | null {
 export class AuditLogInterceptor implements NestInterceptor {
   constructor(private readonly prisma: PrismaService) {}
 
-  intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
+  intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
     const http = context.switchToHttp();
     const req = http.getRequest<RequestWithAccount>();
     const res = http.getResponse<Response>();
 
-    const path = String((req as any).originalUrl || req.url || req.path || '');
+    const path = String(req.originalUrl || req.url || req.path || '');
     const action = actionFromMethod(req.method);
 
     // Only admin write requests.
@@ -121,39 +145,38 @@ export class AuditLogInterceptor implements NestInterceptor {
     const actorAccountId = account?.accountId || null;
     const ip = normalizeIp(req);
     const entityType = entityTypeFromPath(path);
-    const entityId = guessEntityId(req.params as any);
+    const entityId = guessEntityId(isRecord(req.params) ? req.params : {});
     const summary = `${action} ${entityType}${entityId ? `:${entityId}` : ''}`;
     const metadata = redactSecrets({
-      params: req.params,
-      query: req.query,
-      body: req.body,
+      params: req.params as unknown,
+      query: req.query as unknown,
+      body: req.body as unknown,
     });
 
-    let success = true;
+    const writeAuditLog = (isSuccess: boolean) => {
+      const auditLogCreateData = {
+        ActorAccountID: actorAccountId,
+        Action: action,
+        EntityType: entityType,
+        EntityId: entityId,
+        Summary: summary,
+        IpAddress: ip,
+        Success: isSuccess && (res.statusCode || 200) < 400,
+        ...(metadata !== undefined ? { Metadata: metadata } : {}),
+      } satisfies Prisma.AuditLogUncheckedCreateInput;
+
+      void this.prisma.auditLog
+        .create({
+          data: auditLogCreateData,
+        })
+        .catch(() => {});
+    };
 
     return next.handle().pipe(
-      catchError((err) => {
-        success = false;
-        throw err;
-      }),
-      finalize(() => {
-        // Fire-and-forget; do not break request pipeline.
-        void this.prisma.auditLog
-          .create({
-            data: {
-              ActorAccountID: actorAccountId,
-              Action: action,
-              EntityType: entityType,
-              EntityId: entityId,
-              Summary: summary,
-              Metadata: metadata as any,
-              IpAddress: ip,
-              Success: success && (res.statusCode || 200) < 400,
-            },
-          })
-          .catch(() => {});
+      tap({
+        error: () => writeAuditLog(false),
+        complete: () => writeAuditLog(true),
       }),
     );
   }
 }
-

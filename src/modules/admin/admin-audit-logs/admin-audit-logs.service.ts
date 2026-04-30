@@ -1,10 +1,22 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma, AuditLog } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '@infra/prisma/prisma.service';
 
 type AuditStatusFilter = 'all' | 'success' | 'failure';
 type AuditRangePreset = 'last30' | 'last7' | 'today' | 'custom';
 type SortOrder = 'asc' | 'desc';
+
+type AuditLogRow = Prisma.AuditLogGetPayload<{
+  include: {
+    account: {
+      select: {
+        Username: true;
+        Email: true;
+        role: { select: { RoleName: true } };
+      };
+    };
+  };
+}>;
 
 function toInt(value: unknown, fallback: number): number {
   const n = Number(value);
@@ -65,7 +77,21 @@ function parseRange(params: {
 }
 
 function csvEscape(v: unknown): string {
-  const s = v === null || v === undefined ? '' : String(v);
+  const s = (() => {
+    if (v === null || v === undefined) return '';
+    if (typeof v === 'string') return v;
+    if (typeof v === 'number') return Number.isFinite(v) ? String(v) : '';
+    if (typeof v === 'boolean') return v ? 'true' : 'false';
+    if (typeof v === 'bigint') return v.toString();
+    if (typeof v === 'symbol') return v.description ?? '';
+    if (typeof v === 'function') return v.name || '[function]';
+    // object
+    try {
+      return JSON.stringify(v);
+    } catch {
+      return '';
+    }
+  })();
   if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
   return s;
 }
@@ -151,9 +177,7 @@ export class AdminAuditLogsService {
     return where;
   }
 
-  private mapRow(row: AuditLog & {
-    account: { Username: string; Email: string; role: { RoleName: string } } | null;
-  }): AdminAuditLogRow {
+  private mapRow(row: AuditLogRow): AdminAuditLogRow {
     const user = row.account?.Username || row.account?.Email || '—';
     const role = row.account?.role?.RoleName || '—';
     const module = row.EntityType?.trim() || '—';
@@ -207,7 +231,7 @@ export class AdminAuditLogsService {
     ]);
 
     return {
-      items: auditLogRows.map((row) => this.mapRow(row as any)),
+      items: auditLogRows.map((row) => this.mapRow(row)),
       total,
       page: pageNumber,
       limit: pageSize,
@@ -318,7 +342,7 @@ export class AdminAuditLogsService {
       },
     });
 
-    const mappedRows = auditLogRows.map((row) => this.mapRow(row as any));
+    const mappedRows = auditLogRows.map((row) => this.mapRow(row));
     const csvHeaders = ['Timestamp', 'User', 'Role', 'Module', 'Action', 'Status', 'Description', 'IP Address'];
     const csvRows = mappedRows.map((row) => ({
       Timestamp: row.CreatedAt,

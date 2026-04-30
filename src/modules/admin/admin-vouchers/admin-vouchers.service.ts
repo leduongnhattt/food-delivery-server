@@ -151,13 +151,13 @@ export class AdminVouchersService {
     range?: string;
   }): Required<AdminVoucherListQuery> {
     const statusRaw = (input.status || 'all').toLowerCase();
-    const status: 'all' | 'pending' | 'approved' | 'rejected' | 'expired' =
-      statusRaw === 'pending' ||
-      statusRaw === 'approved' ||
-      statusRaw === 'rejected' ||
-      statusRaw === 'expired'
-        ? (statusRaw as any)
-        : 'all';
+    const status: 'all' | 'pending' | 'approved' | 'rejected' | 'expired' = (() => {
+      if (statusRaw === 'pending') return 'pending';
+      if (statusRaw === 'approved') return 'approved';
+      if (statusRaw === 'rejected') return 'rejected';
+      if (statusRaw === 'expired') return 'expired';
+      return 'all';
+    })();
     const q = (input.q || '').trim();
     const parsedPage = parseInt(input.page || '1', 10);
     const page = Math.max(parsedPage || 1, 1);
@@ -165,8 +165,12 @@ export class AdminVouchersService {
     const limit = Math.min(Math.max(parsedLimit || 50, 1), 200);
 
     const rangeRaw = String(input.range || 'all').toLowerCase();
-    const range: 'all' | '7d' | '30d' | '90d' =
-      rangeRaw === '7d' || rangeRaw === '30d' || rangeRaw === '90d' ? (rangeRaw as any) : 'all';
+    const range: 'all' | '7d' | '30d' | '90d' = (() => {
+      if (rangeRaw === '7d') return '7d';
+      if (rangeRaw === '30d') return '30d';
+      if (rangeRaw === '90d') return '90d';
+      return 'all';
+    })();
 
     return { status, q, page, limit, range };
   }
