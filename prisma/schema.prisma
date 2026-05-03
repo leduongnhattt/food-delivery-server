@@ -92,6 +92,8 @@ model Customer {
   userHealth UserHealth[]
   orders  Order[]
   returnRequests ReturnRequest[]
+  favoriteEnterprises CustomerFavoriteEnterprise[]
+  favoriteFoods       CustomerFavoriteFood[]
 
   @@index([PreferredPaymentMethod])
   @@index([Latitude, Longitude])
@@ -178,6 +180,7 @@ model Enterprise {
   payoutRequests               EnterprisePayoutRequest[]
   ledgerEntries                EnterpriseLedgerEntry[]
   notifications                EnterpriseNotification[]
+  favoritedByCustomers         CustomerFavoriteEnterprise[]
 
   @@index([AccountID])
   @@index([EnterpriseName])
@@ -269,6 +272,7 @@ model Food {
   orderDetails OrderDetail[]
   cartItems    CartItem[]
   returnRequestItems ReturnRequestItem[]
+  favoritedByCustomers CustomerFavoriteFood[]
 
   @@index([FoodCategoryID])
   @@index([EnterpriseID])
@@ -278,6 +282,36 @@ model Food {
   @@index([EnterpriseID, IsAvailable])
   @@fulltext([DishName, Description])
   @@map("FOOD")
+}
+
+model CustomerFavoriteEnterprise {
+  FavoriteEnterpriseID String   @id @default(uuid()) @db.VarChar(36)
+  CustomerID           String   @db.VarChar(36)
+  EnterpriseID         String   @db.VarChar(36)
+  CreatedAt            DateTime @default(now())
+
+  customer   Customer   @relation(fields: [CustomerID], references: [CustomerID], onDelete: Cascade)
+  enterprise Enterprise @relation(fields: [EnterpriseID], references: [EnterpriseID], onDelete: Cascade)
+
+  @@unique([CustomerID, EnterpriseID])
+  @@index([CustomerID, CreatedAt])
+  @@index([EnterpriseID])
+  @@map("CUSTOMER_FAVORITE_ENTERPRISE")
+}
+
+model CustomerFavoriteFood {
+  FavoriteFoodID String   @id @default(uuid()) @db.VarChar(36)
+  CustomerID     String   @db.VarChar(36)
+  FoodID         String   @db.VarChar(36)
+  CreatedAt      DateTime @default(now())
+
+  customer Customer @relation(fields: [CustomerID], references: [CustomerID], onDelete: Cascade)
+  food     Food     @relation(fields: [FoodID], references: [FoodID], onDelete: Cascade)
+
+  @@unique([CustomerID, FoodID])
+  @@index([CustomerID, CreatedAt])
+  @@index([FoodID])
+  @@map("CUSTOMER_FAVORITE_FOOD")
 }
 
 model Menu {

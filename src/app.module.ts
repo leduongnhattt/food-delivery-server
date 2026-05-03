@@ -26,6 +26,7 @@ import { SupportModule } from '@modules/support/support.module';
 import { MailModule } from '@infra/mail/mail.module';
 import { RabbitMqModule } from '@infra/rabbitmq/rabbitmq.module';
 import { JobsModule } from '@src/jobs/jobs.module';
+import { FavoritesModule } from '@modules/favorites/favorites.module';
 
 @Module({
   imports: [
@@ -54,6 +55,7 @@ import { JobsModule } from '@src/jobs/jobs.module';
     StockModule,
     RegistryModule,
     SupportModule,
+    FavoritesModule,
   ],
   controllers: [AppController],
   providers: [AppService],
