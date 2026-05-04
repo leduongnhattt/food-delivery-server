@@ -1,5 +1,4 @@
 import { Injectable } from '@nestjs/common';
-import { HealthAiHttpService } from '@modules/health/healthAiHttp.service';
 
 type SupportedLocale = 'en' | 'vi';
 
@@ -272,44 +271,30 @@ Schema:
 
 @Injectable()
 export class HealthGeminiService {
-  constructor(private readonly healthAiHttp: HealthAiHttpService) { }
-
+  /** Used when `GEMINI_MODEL` is unset (Google renames models over time). */
   private readonly modelsToTry = [
     // NOTE: Gemini model aliases change over time; prefer stable names.
+    'gemini-2.5-flash',
     'gemini-2.0-flash',
-    'gemini-1.5-flash',
     'gemini-1.5-pro',
   ] as const;
 
   async analyze(profile: HealthProfileDto): Promise<GeminiHealthAnalysisDto> {
-    const errors: string[] = [];
-
-    // Prefer calling health-ai-service first (same contract/shape), then fallback to Gemini.
-    if (this.healthAiHttp.isEnabled()) {
-      try {
-        return await this.healthAiHttp.recommend(profile);
-      } catch (e) {
-        errors.push(e instanceof Error ? e.message : String(e));
-      }
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      throw new Error(
+        'GEMINI_API_KEY is missing. Set it to use Google Gemini for POST /health/gemini-analyze and POST /health/ai-analyze.',
+      );
     }
 
     const locale = getSystemLocale();
     const prompt = buildPrompt(locale, profile);
 
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      if (errors.length > 0) {
-        throw new Error(
-          `health-ai-service failed (${errors.join(
-            ' | ',
-          )}) and GEMINI_API_KEY is missing. Cannot fallback to Gemini.`,
-        );
-      }
-      throw new Error('GEMINI_API_KEY is missing. Cannot generate AI content.');
-    }
+    const configuredModel = (process.env.GEMINI_MODEL || '').trim();
+    const models = configuredModel ? [configuredModel] : [...this.modelsToTry];
 
     let lastError: string | null = null;
-    for (const model of this.modelsToTry) {
+    for (const model of models) {
       try {
         const text = await this.generateContent(apiKey, model, prompt);
         const cleaned = cleanJsonText(text);
@@ -321,9 +306,7 @@ export class HealthGeminiService {
     }
 
     throw new Error(
-      [errors.length ? `health-ai-service failed: ${errors.join(' | ')}` : null, lastError]
-        .filter(Boolean)
-        .join(' | ') || 'All Gemini models failed to generate content.',
+      lastError || 'All Gemini models failed to generate content.',
     );
   }
 
@@ -332,7 +315,12 @@ export class HealthGeminiService {
     model: string,
     prompt: string,
   ): Promise<string> {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+    const base = (
+      process.env.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta'
+    )
+      .trim()
+      .replace(/\/+$/, '');
+    const url = `${base}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
