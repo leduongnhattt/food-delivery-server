@@ -111,11 +111,11 @@ This project reads `.env` from the project root (it is loaded even when running 
   - `STRIPE_SECRET_KEY`
   - `STRIPE_WEBHOOK_SECRET`
   - `APP_URL`: frontend base URL for checkout success/cancel redirects
-- **Health AI**
-  - `HEALTH_AI_BASE_URL`: base URL for `health-ai-service` (FastAPI) (default `http://127.0.0.1:8000`)
-  - `HEALTH_AI_TIMEOUT_MS`: timeout for `POST /recommend` (default `90000`)
-  - `HEALTH_AI_ENABLED`: enable calling health-ai-service first (`true`/`false`, default `true`)
-  - `GEMINI_API_KEY`: fallback key (used if health-ai-service fails)
+- **Health AI (Gemini)**
+  - `GEMINI_API_KEY`: required for `POST /health/ai-analyze` and `POST /health/gemini-analyze` (Google Generative Language API; server calls Gemini directly, not the Python FastAPI service)
+  - `GEMINI_MODEL` (optional): e.g. `gemini-2.0-flash`; if unset, the server tries a small built-in list of model names
+  - `GEMINI_BASE_URL` (optional): default `https://generativelanguage.googleapis.com/v1beta`
+  - Optional FastAPI client (`HEALTH_AI_BASE_URL`, `HEALTH_AI_ENABLED`) remains in `healthAiHttp.service.ts` for reuse or custom wiring; the health analyze routes above use Gemini only
 
 > Note: **Do not commit** `.env` to git. If secrets were ever committed/pushed, rotate them immediately.
 

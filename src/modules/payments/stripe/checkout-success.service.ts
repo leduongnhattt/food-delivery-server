@@ -30,6 +30,11 @@ type StripeAttempt = {
     dto: CreateCheckoutSessionRequestDto;
     createdAtIso?: string;
     orderId?: string;
+    pricing?: {
+        subtotal: number;
+        deliveryFee: number;
+        voucherDiscount: number;
+    };
 };
 
 function isStripeAttempt(value: unknown): value is StripeAttempt {
@@ -128,6 +133,15 @@ export class CheckoutSuccessService {
                         accountId,
                         voucherCode: dto.voucherCode || null,
                         phone: dto.deliveryInfo?.phone || null,
+                        ...(attempt.pricing
+                            ? {
+                                  checkout: {
+                                      subtotal: attempt.pricing.subtotal,
+                                      deliveryFee: attempt.pricing.deliveryFee,
+                                      voucherDiscount: attempt.pricing.voucherDiscount,
+                                  },
+                              }
+                            : {}),
                     },
                     orderDetails: {
                         create: (dto.cartItems || []).map((item) => ({
