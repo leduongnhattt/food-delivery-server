@@ -6,6 +6,19 @@ import { PrismaService } from "@src/infra/prisma/prisma.service";
 export class AdminOrdersService {
   constructor(private readonly prisma: PrismaService) { }
 
+  /**
+   * Admin list shows the last 5 characters of `OrderID` (see food-delivery-app table).
+   * Search with a short code matches `OrderID` via suffix; a full hyphenated UUID still matches exactly.
+   */
+  private orderIdWhereClause(orderId: string | undefined): { OrderID: string } | { OrderID: { endsWith: string } } {
+    const raw = orderId?.trim() ?? '';
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(raw)) {
+      return { OrderID: raw };
+    }
+    const suffix = raw.slice(-5);
+    return { OrderID: { endsWith: suffix } };
+  }
+
   private buildWhere(params: {
     orderId?: string;
     enterpriseId?: string;
@@ -18,7 +31,7 @@ export class AdminOrdersService {
   }) {
     return {
       AND: [
-        params.orderId ? { OrderID: params.orderId } : {},
+        params.orderId?.trim() ? this.orderIdWhereClause(params.orderId) : {},
 
         params.enterpriseId
           ? {
@@ -204,9 +217,34 @@ export class AdminOrdersService {
       select: {
         OrderID: true,
         TotalAmount: true,
+        CommissionAmount: true,
         Status: true,
         OrderDate: true,
         CustomerID: true,
+        DeliveryAddress: true,
+        DeliveryNote: true,
+        EstimatedDeliveryTime: true,
+        DeliveredAt: true,
+        Metadata: true,
+        voucher: {
+          select: {
+            VoucherID: true,
+            Code: true,
+            DiscountPercent: true,
+            DiscountAmount: true,
+            EnterpriseID: true,
+            CreatedBy: true,
+          },
+        },
+        payments: {
+          orderBy: { PaymentDate: "desc" },
+          select: {
+            PaymentMethod: true,
+            PaymentDate: true,
+            PaymentStatus: true,
+            TransactionID: true,
+          },
+        },
         customer: {
           select: {
             FullName: true,
@@ -218,6 +256,8 @@ export class AdminOrdersService {
             FoodID: true,
             Quantity: true,
             SubTotal: true,
+            AppliedCommissionPercent: true,
+            CommissionLineAmount: true,
             food: {
               select: {
                 DishName: true,
@@ -226,6 +266,8 @@ export class AdminOrdersService {
                   select: {
                     EnterpriseID: true,
                     EnterpriseName: true,
+                    Address: true,
+                    PhoneNumber: true,
                   },
                 },
               },

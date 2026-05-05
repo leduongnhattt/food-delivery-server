@@ -432,6 +432,11 @@ export class OrdersService {
       voucherId,
       totalAmount: total,
       paymentIntentId,
+      checkoutPricing: {
+        subtotal,
+        deliveryFee,
+        voucherDiscount,
+      },
     });
 
     if (enterpriseId) {

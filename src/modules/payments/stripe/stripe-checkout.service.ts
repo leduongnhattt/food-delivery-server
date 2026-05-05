@@ -159,6 +159,12 @@ export class StripeCheckoutService {
                 customerId: customer.CustomerID,
                 dto: { ...dto, total: computedTotal },
                 enterpriseId,
+                /** Persisted on `Order.Metadata.checkout` after payment (admin / receipts). */
+                pricing: {
+                    subtotal,
+                    deliveryFee: computedDeliveryFee,
+                    voucherDiscount,
+                },
                 createdAtIso: new Date().toISOString(),
             },
             this.stripeAttemptTtlSeconds(),
