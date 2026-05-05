@@ -317,6 +317,12 @@ export class OrdersRepository {
     voucherId: string | null;
     totalAmount: number;
     paymentIntentId?: string;
+    /** Saved on `Order.Metadata.checkout` for admin / payment breakdown */
+    checkoutPricing?: {
+      subtotal: number;
+      deliveryFee: number;
+      voucherDiscount: number;
+    };
   }) {
     const order = await this.prisma.order.create({
       data: {
@@ -326,6 +332,17 @@ export class OrdersRepository {
         DeliveryAddress: params.deliveryAddress,
         DeliveryNote: '',
         Status: ORDER_STATUS.Pending,
+        ...(params.checkoutPricing
+          ? {
+              Metadata: {
+                checkout: {
+                  subtotal: params.checkoutPricing.subtotal,
+                  deliveryFee: params.checkoutPricing.deliveryFee,
+                  voucherDiscount: params.checkoutPricing.voucherDiscount,
+                },
+              },
+            }
+          : {}),
       },
     });
 

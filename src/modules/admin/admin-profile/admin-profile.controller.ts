@@ -15,10 +15,11 @@ export class AdminProfileController {
 
   @Get()
   @UseGuards(JwtAuthGuard, AdminRoleGuard)
-  get(@CurrentAccount() account: JwtPayload | null) {
-    if (!account?.accountId) {
+  get(@CurrentAccount() jwtPayload: JwtPayload | null) {
+    const accountId = jwtPayload?.accountId;
+    if (!accountId) {
       throw new UnauthorizedException('Unauthorized');
     }
-    return this.adminProfileService.getProfileForAccount(account.accountId);
+    return this.adminProfileService.getProfileForAccount(accountId);
   }
 }
