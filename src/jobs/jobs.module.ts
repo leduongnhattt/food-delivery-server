@@ -7,6 +7,7 @@ import { TransactionFeeExpiryJob } from '@src/jobs/finance/transaction-fee-expir
 import { OrderAutoCompleteJob } from '@src/jobs/orders/order-auto-complete.job';
 import { OrderAcceptanceTimeoutJob } from '@src/jobs/orders/order-acceptance-timeout.job';
 import { EnterpriseInvitationCleanupJob } from '@src/jobs/enterprise/enterprise-invitation-cleanup.job';
+import { EnterpriseInvitationExpiryJob } from '@src/jobs/enterprise/enterprise-invitation-expiry.job';
 import { EnterprisePayoutRequestExpiryJob } from '@src/jobs/enterprise/enterprise-payout-request-expiry.job';
 
 @Module({
@@ -17,6 +18,7 @@ import { EnterprisePayoutRequestExpiryJob } from '@src/jobs/enterprise/enterpris
     OrderAcceptanceTimeoutJob,
 
     // enterprise
+    EnterpriseInvitationExpiryJob,
     EnterpriseInvitationCleanupJob,
     EnterprisePayoutRequestExpiryJob,
 

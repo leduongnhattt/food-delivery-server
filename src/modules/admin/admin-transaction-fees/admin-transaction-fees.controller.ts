@@ -36,6 +36,18 @@ export class AdminTransactionFeesController {
     return this.service.listGlobalRules();
   }
 
+  @Get('global-rules/:ruleId')
+  @UseGuards(JwtAuthGuard, AdminRoleGuard)
+  getGlobalRule(
+    @CurrentAccount() account: JwtPayload | null,
+    @Param('ruleId') ruleId: string,
+  ) {
+    if (!account?.accountId) {
+      throw new UnauthorizedException('Unauthorized');
+    }
+    return this.service.getGlobalRuleById(ruleId);
+  }
+
   @Post('global-rules')
   @UseGuards(JwtAuthGuard, AdminRoleGuard)
   createGlobalRule(

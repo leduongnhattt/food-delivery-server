@@ -217,6 +217,20 @@ export class AdminCommissionFeesService {
     };
   }
 
+  async getGlobalRuleById(ruleId: string) {
+    const id = asTrimmedString(ruleId);
+    if (!id) throw new BadRequestException('ruleId is required');
+    const row = await this.prisma.platformCommissionGlobalRule.findFirst({
+      where: { RuleID: id, DeletedAt: null },
+      select: globalRuleSelect,
+    });
+    if (!row) throw new NotFoundException('Global rule not found');
+    return {
+      success: true as const,
+      item: mapGlobalRuleRow(row),
+    };
+  }
+
   async createGlobalRule(
     accountId: string,
     body: {
