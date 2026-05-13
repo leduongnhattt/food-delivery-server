@@ -21,9 +21,48 @@ export interface UpdateEnterpriseProfileDto {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+type VoucherRowForProfile = {
+  VoucherID: string;
+  Code: string;
+  DiscountPercent: Prisma.Decimal | null;
+  DiscountAmount: Prisma.Decimal | null;
+  MinOrderValue: Prisma.Decimal | null;
+  ExpiryDate: Date | null;
+  Status: string;
+  MaxUsage: number | null;
+  UsedCount: number;
+};
+
 @Injectable()
 export class EnterpriseProfileService {
   constructor(private readonly prisma: PrismaService) { }
+
+  /** Plain JSON + explicit `usage` so clients always show redemption limits. */
+  private serializeVoucherForProfile(v: VoucherRowForProfile) {
+    const usedCount = Number(v.UsedCount) || 0;
+    const maxUsage = v.MaxUsage == null ? null : Number(v.MaxUsage);
+    const remaining =
+      maxUsage == null ? null : Math.max(0, maxUsage - usedCount);
+    return {
+      VoucherID: v.VoucherID,
+      Code: v.Code,
+      DiscountPercent:
+        v.DiscountPercent == null ? null : Number(v.DiscountPercent),
+      DiscountAmount:
+        v.DiscountAmount == null ? null : Number(v.DiscountAmount),
+      MinOrderValue:
+        v.MinOrderValue == null ? null : Number(v.MinOrderValue),
+      ExpiryDate: v.ExpiryDate,
+      Status: v.Status,
+      MaxUsage: maxUsage,
+      UsedCount: usedCount,
+      usage: {
+        usedCount,
+        maxUsage,
+        remaining,
+      },
+    };
+  }
 
   async getProfile(accountId: string, include: EnterpriseProfileInclude) {
     const baseSelect = {
@@ -78,8 +117,12 @@ export class EnterpriseProfileService {
           VoucherID: true,
           Code: true,
           DiscountPercent: true,
+          DiscountAmount: true,
+          MinOrderValue: true,
           ExpiryDate: true,
           Status: true,
+          MaxUsage: true,
+          UsedCount: true,
         },
         orderBy: { ExpiryDate: 'asc' },
       } satisfies Prisma.VoucherFindManyArgs;
@@ -92,6 +135,16 @@ export class EnterpriseProfileService {
 
     if (!enterprise) {
       throw new NotFoundException('Enterprise profile not found');
+    }
+
+    if (include === 'vouchers' && Array.isArray(enterprise.vouchers)) {
+      const vouchers = enterprise.vouchers as unknown as VoucherRowForProfile[];
+      return {
+        enterprise: {
+          ...enterprise,
+          vouchers: vouchers.map((v) => this.serializeVoucherForProfile(v)),
+        },
+      };
     }
 
     return { enterprise };

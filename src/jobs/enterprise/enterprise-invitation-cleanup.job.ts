@@ -1,7 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '@infra/prisma/prisma.service';
-import { AccountStatus } from '@prisma/client';
+import { AccountStatus, EnterpriseInvitationStatus } from '@prisma/client';
+
+/** After this many days past `ExpiresAt`, `Expired` rows may be purged with orphan inactive accounts. */
+const EXPIRED_INVITATION_RETENTION_DAYS = 30;
 
 @Injectable()
 export class EnterpriseInvitationCleanupJob {
@@ -10,17 +13,21 @@ export class EnterpriseInvitationCleanupJob {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * Deletes expired enterprise invitations and their pending accounts.
+   * Deletes old `Expired` invitations and their unused inactive accounts (no Enterprise).
+   * Pending rows past expiry are marked `Expired` by {@link EnterpriseInvitationExpiryJob} first.
    *
    * Runs daily. Only deletes accounts that are still `Inactive` and have no linked Enterprise.
    */
   @Cron('0 2 * * *') // 02:00 daily
   async runDaily(): Promise<void> {
     const now = new Date();
+    const cutoff = new Date(
+      now.getTime() - EXPIRED_INVITATION_RETENTION_DAYS * 24 * 60 * 60 * 1000,
+    );
     const expired = await this.prisma.enterpriseInvitation.findMany({
       where: {
-        Status: 'Pending',
-        ExpiresAt: { lte: now },
+        Status: EnterpriseInvitationStatus.Expired,
+        ExpiresAt: { lte: cutoff },
       },
       select: { InvitationID: true, AccountID: true, Email: true },
       take: 200,

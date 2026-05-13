@@ -7,6 +7,7 @@ import { EtaService } from '@modules/shipping/eta.service';
 import { DeliveryFeeService } from '@modules/shipping/delivery-fee.service';
 import crypto from 'crypto';
 import { setKeyJson } from '@infra/redis/redis.service';
+import { VouchersService } from '@modules/vouchers/vouchers.service';
 
 /**
  * Handles Stripe Checkout API: session creation, line items, commission fee, and voucher coupons.
@@ -19,6 +20,7 @@ export class StripeCheckoutService {
         private readonly stripeService: StripeService,
         private readonly etaService: EtaService,
         private readonly deliveryFee: DeliveryFeeService,
+        private readonly vouchers: VouchersService,
     ) { }
 
     private get stripe(): Stripe {
@@ -127,9 +129,42 @@ export class StripeCheckoutService {
             (sum, item) => sum + Number(item.menuItem.price) * Number(item.quantity ?? 0),
             0,
         );
-        // Treat any difference between (subtotal + deliveryFee) and provided dto.total as voucher discount.
-        const voucherDiscount = Math.max(0, subtotal + computedDeliveryFee - Number(total));
-        const computedTotal = Math.max(0, subtotal + computedDeliveryFee - voucherDiscount);
+        const impliedDiscount = Math.max(
+            0,
+            subtotal + computedDeliveryFee - Number(total),
+        );
+
+        let voucherDiscount = 0;
+        let voucherIdForAttempt: string | null = null;
+        const trimmedVoucher = (voucherCode ?? '').trim();
+        if (trimmedVoucher) {
+            const applied = await this.vouchers.findApplicableVoucherForOrder({
+                code: trimmedVoucher,
+                subtotal,
+                cartRestaurantIds: cartItems.map((i) =>
+                    (i.menuItem?.restaurantId ?? '').trim(),
+                ),
+            });
+            if (!applied) {
+                throw new BadRequestException(
+                    'Voucher is invalid, expired, not applicable, or has reached its usage limit.',
+                );
+            }
+            voucherDiscount = applied.discount;
+            voucherIdForAttempt = applied.voucherId;
+            if (Math.abs(impliedDiscount - voucherDiscount) > 0.05) {
+                throw new BadRequestException(
+                    'Order total does not match the discount for this voucher.',
+                );
+            }
+        } else if (impliedDiscount > 0.05) {
+            throw new BadRequestException('Discount requires a valid promo code.');
+        }
+
+        const computedTotal = Math.max(
+            0,
+            subtotal + computedDeliveryFee - voucherDiscount,
+        );
 
         const lineItems = this.buildLineItems(cartItems, currency);
         if (computedDeliveryFee > 0) {
@@ -142,10 +177,9 @@ export class StripeCheckoutService {
                 quantity: 1,
             });
         }
-        const discounts = await this.buildVoucherDiscount(
-            voucherCode,
-            lineItems,
-            computedTotal,
+        const discounts = await this.buildStripeCouponForVoucherDiscount(
+            trimmedVoucher || undefined,
+            voucherDiscount,
             currency,
         );
 
@@ -165,6 +199,7 @@ export class StripeCheckoutService {
                     deliveryFee: computedDeliveryFee,
                     voucherDiscount,
                 },
+                voucherId: voucherIdForAttempt,
                 createdAtIso: new Date().toISOString(),
             },
             this.stripeAttemptTtlSeconds(),
@@ -230,24 +265,13 @@ export class StripeCheckoutService {
         }));
     }
 
-    private async buildVoucherDiscount(
+    private async buildStripeCouponForVoucherDiscount(
         voucherCode: string | undefined,
-        lineItems: Stripe.Checkout.SessionCreateParams.LineItem[],
-        total: number,
+        voucherDiscountUsd: number,
         currency: string,
     ): Promise<Stripe.Checkout.SessionCreateParams.Discount[] | undefined> {
-        if (!voucherCode) return undefined;
-        const totalBeforeDiscount =
-            lineItems.reduce((sum, li) => {
-                const priceData = li.price_data as
-                    | { unit_amount?: number }
-                    | undefined;
-                const amount = priceData?.unit_amount ?? 0;
-                const qty = li.quantity ?? 1;
-                return sum + amount * qty;
-            }, 0) / 100;
-        const absDiscount = Math.max(0, totalBeforeDiscount - total);
-        const absDiscountCents = Math.max(0, Math.round(absDiscount * 100));
+        if (!voucherCode || voucherDiscountUsd <= 0) return undefined;
+        const absDiscountCents = Math.max(0, Math.round(voucherDiscountUsd * 100));
         if (absDiscountCents <= 0) return undefined;
         const coupon = await this.stripe.coupons.create({
             amount_off: absDiscountCents,

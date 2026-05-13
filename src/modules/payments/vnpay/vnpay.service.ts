@@ -16,6 +16,8 @@ import {
 } from '@modules/payments/vnpay/utils/vnpay-payment-context.lookup';
 import { invalidateEnterpriseOrderCaches } from '@modules/enterprise/orders/enterprise-order-cache.util';
 import { getKeyJson, setKeyJson } from '@infra/redis/redis.service';
+import { VouchersService } from '@modules/vouchers/vouchers.service';
+import { incrementVoucherUsedCountInTx } from '@common/utils/voucher-usage.in-tx';
 import {
   buildVnpSignablePayloadString,
   collectVnpQueryFieldsForSignature,
@@ -47,6 +49,12 @@ type VnpPayAttempt = {
   status: 'created' | 'paid' | 'failed';
   orderId?: string | null;
   ipn?: VnpIpnQueryParams;
+  voucherId?: string | null;
+  pricing?: {
+    subtotal: number;
+    deliveryFee: number;
+    voucherDiscount: number;
+  };
 };
 
 @Injectable()
@@ -57,6 +65,7 @@ export class VnPayService {
     private readonly etaService: EtaService,
     private readonly commissionSettlement: CommissionSettlementService,
     private readonly deliveryFee: DeliveryFeeService,
+    private readonly vouchers: VouchersService,
   ) { }
 
   private vnpAttemptKey(paymentId: string) {
@@ -104,8 +113,42 @@ export class VnPayService {
       (sum, item) => sum + Number(item.menuItem.price) * Number(item.quantity ?? 0),
       0,
     );
-    const voucherDiscount = Math.max(0, subtotal + computedDeliveryFee - Number(dto.total));
-    const computedTotal = Math.max(0, subtotal + computedDeliveryFee - voucherDiscount);
+    const impliedDiscount = Math.max(
+      0,
+      subtotal + computedDeliveryFee - Number(dto.total),
+    );
+
+    let voucherDiscount = 0;
+    let voucherIdForAttempt: string | null = null;
+    const trimmedVoucher = (dto.voucherCode ?? '').trim();
+    if (trimmedVoucher) {
+      const applied = await this.vouchers.findApplicableVoucherForOrder({
+        code: trimmedVoucher,
+        subtotal,
+        cartRestaurantIds: (dto.cartItems ?? []).map((i) =>
+          (i.menuItem?.restaurantId ?? '').trim(),
+        ),
+      });
+      if (!applied) {
+        throw new BadRequestException(
+          'Voucher is invalid, expired, not applicable, or has reached its usage limit.',
+        );
+      }
+      voucherDiscount = applied.discount;
+      voucherIdForAttempt = applied.voucherId;
+      if (Math.abs(impliedDiscount - voucherDiscount) > 0.05) {
+        throw new BadRequestException(
+          'Order total does not match the discount for this voucher.',
+        );
+      }
+    } else if (impliedDiscount > 0.05) {
+      throw new BadRequestException('Discount requires a valid promo code.');
+    }
+
+    const computedTotal = Math.max(
+      0,
+      subtotal + computedDeliveryFee - voucherDiscount,
+    );
 
     const { amountVnd, exchangeRateVndPerUsd, fxQuoteHost } =
       await this.computeVnpAmountVnd({
@@ -127,6 +170,12 @@ export class VnPayService {
       createdAtIso: new Date().toISOString(),
       status: 'created',
       orderId: null,
+      voucherId: voucherIdForAttempt,
+      pricing: {
+        subtotal,
+        deliveryFee: computedDeliveryFee,
+        voucherDiscount,
+      },
     };
     await setKeyJson(this.vnpAttemptKey(paymentId), attempt, this.attemptTtlSeconds());
 
@@ -213,7 +262,7 @@ export class VnPayService {
       const order = await tx.order.create({
         data: {
           CustomerID: attempt.customerId,
-          VoucherID: null,
+          VoucherID: attempt.voucherId ?? null,
           TotalAmount: dto.total,
           DeliveryAddress: dto.deliveryInfo.address,
           DeliveryNote: '',
@@ -230,6 +279,15 @@ export class VnPayService {
               usdToVndRate: attempt.exchangeRateVndPerUsd,
               fxQuoteHost: attempt.fxQuoteHost,
             },
+            ...(attempt.pricing
+              ? {
+                  checkout: {
+                    subtotal: attempt.pricing.subtotal,
+                    deliveryFee: attempt.pricing.deliveryFee,
+                    voucherDiscount: attempt.pricing.voucherDiscount,
+                  },
+                }
+              : {}),
           },
           orderDetails: {
             create: dto.cartItems.map((item) => ({
@@ -261,6 +319,10 @@ export class VnPayService {
           },
         },
       });
+
+      if (attempt.voucherId) {
+        await incrementVoucherUsedCountInTx(tx, attempt.voucherId);
+      }
 
       return order.OrderID;
     });

@@ -16,6 +16,7 @@ import { getKeyJson, setKeyJson } from '@infra/redis/redis.service';
 import { EtaService } from '@modules/shipping/eta.service';
 import { invalidateEnterpriseOrderCaches } from '@modules/enterprise/orders/enterprise-order-cache.util';
 import type { CreateCheckoutSessionRequestDto } from '@modules/payments/dto';
+import { incrementVoucherUsedCountInTx } from '@common/utils/voucher-usage.in-tx';
 
 /** Cart item with food and enterprise (from Prisma findMany include). */
 type CartItemWithFood = Prisma.CartItemGetPayload<{
@@ -30,6 +31,7 @@ type StripeAttempt = {
     dto: CreateCheckoutSessionRequestDto;
     createdAtIso?: string;
     orderId?: string;
+    voucherId?: string | null;
     pricing?: {
         subtotal: number;
         deliveryFee: number;
@@ -124,6 +126,7 @@ export class CheckoutSuccessService {
             const order = await tx.order.create({
                 data: {
                     CustomerID: customer.CustomerID,
+                    VoucherID: attempt.voucherId ?? null,
                     TotalAmount: amountTotal !== null ? amountTotal / 100 : dto.total,
                     DeliveryAddress: dto.deliveryInfo?.address || '',
                     DeliveryNote: '',
@@ -178,6 +181,10 @@ export class CheckoutSuccessService {
                     },
                 },
             });
+
+            if (attempt.voucherId) {
+                await incrementVoucherUsedCountInTx(tx, attempt.voucherId);
+            }
 
             return order.OrderID;
         });

@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Get,
+  Param,
   Post,
   Query,
   UseGuards,
@@ -49,6 +50,26 @@ export class EnterpriseIncomeController {
       limit,
       cursor,
     });
+  }
+
+  @Get('ledger/:ledgerEntryId')
+  @UseGuards(JwtAuthGuard)
+  async getLedgerEntry(
+    @CurrentAccount() account: JwtPayload | null,
+    @Param('ledgerEntryId') ledgerEntryId: string,
+  ) {
+    this.assertEnterprise(account);
+    return this.service.getLedgerEntryDetail(account.accountId, ledgerEntryId);
+  }
+
+  @Post('ledger/:ledgerEntryId/cancel-withdrawal')
+  @UseGuards(JwtAuthGuard)
+  async cancelWithdrawal(
+    @CurrentAccount() account: JwtPayload | null,
+    @Param('ledgerEntryId') ledgerEntryId: string,
+  ) {
+    this.assertEnterprise(account);
+    return this.service.cancelPendingWithdrawalByLedgerEntry(account.accountId, ledgerEntryId);
   }
 
   @Post('withdraw')

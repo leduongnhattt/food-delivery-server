@@ -12,6 +12,7 @@ import {
   PAYMENT_STATUS,
 } from '@common/constants/order-payment-status.constants';
 import { PAYMENT_METHOD } from '@common/constants/payment-method.constants';
+import { incrementVoucherUsedCountInTx } from '@common/utils/voucher-usage.in-tx';
 
 export type OrderForCustomerList = Prisma.OrderGetPayload<{
   include: {
@@ -37,6 +38,14 @@ export type OrderForCustomerList = Prisma.OrderGetPayload<{
     customer: { select: { FullName: true } };
     payments: true;
     returnRequest: { select: { Status: true } };
+    voucher: {
+      select: {
+        Code: true;
+        DiscountPercent: true;
+        DiscountAmount: true;
+        MinOrderValue: true;
+      };
+    };
   };
 }>;
 
@@ -57,7 +66,7 @@ export const OrdersRepositoryLimits = {
 
 @Injectable()
 export class OrdersRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) { }
 
   normalizePagination(
     page?: number,
@@ -141,6 +150,14 @@ export class OrdersRepository {
           },
           payments: { orderBy: { PaymentDate: 'desc' }, take: 1 },
           returnRequest: { select: { Status: true } },
+          voucher: {
+            select: {
+              Code: true,
+              DiscountPercent: true,
+              DiscountAmount: true,
+              MinOrderValue: true,
+            },
+          },
         },
         orderBy: { OrderDate: 'desc' },
         skip,
@@ -173,6 +190,14 @@ export class OrdersRepository {
         },
         payments: { orderBy: { PaymentDate: 'desc' }, take: 1 },
         returnRequest: { select: { Status: true } },
+        voucher: {
+          select: {
+            Code: true,
+            DiscountPercent: true,
+            DiscountAmount: true,
+            MinOrderValue: true,
+          },
+        },
       },
     });
   }
@@ -224,8 +249,8 @@ export class OrdersRepository {
 
     const base =
       ctx.Metadata &&
-      typeof ctx.Metadata === 'object' &&
-      !Array.isArray(ctx.Metadata)
+        typeof ctx.Metadata === 'object' &&
+        !Array.isArray(ctx.Metadata)
         ? (ctx.Metadata as Record<string, unknown>)
         : {};
 
@@ -298,18 +323,6 @@ export class OrdersRepository {
     return row?.EnterpriseID ?? null;
   }
 
-  async findValidVoucherId(code: string): Promise<string | null> {
-    const voucher = await this.prisma.voucher.findFirst({
-      where: {
-        Code: code,
-        Status: 'Approved',
-        ExpiryDate: { gt: new Date() },
-      },
-      select: { VoucherID: true },
-    });
-    return voucher?.VoucherID ?? null;
-  }
-
   async createOrderWithDetailsAndPayment(params: {
     customerId: string;
     cartItems: OrderCartItemDto[];
@@ -324,16 +337,17 @@ export class OrdersRepository {
       voucherDiscount: number;
     };
   }) {
-    const order = await this.prisma.order.create({
-      data: {
-        CustomerID: params.customerId,
-        VoucherID: params.voucherId,
-        TotalAmount: params.totalAmount,
-        DeliveryAddress: params.deliveryAddress,
-        DeliveryNote: '',
-        Status: ORDER_STATUS.Pending,
-        ...(params.checkoutPricing
-          ? {
+    return this.prisma.$transaction(async (tx) => {
+      const order = await tx.order.create({
+        data: {
+          CustomerID: params.customerId,
+          VoucherID: params.voucherId,
+          TotalAmount: params.totalAmount,
+          DeliveryAddress: params.deliveryAddress,
+          DeliveryNote: '',
+          Status: ORDER_STATUS.Pending,
+          ...(params.checkoutPricing
+            ? {
               Metadata: {
                 checkout: {
                   subtotal: params.checkoutPricing.subtotal,
@@ -342,42 +356,47 @@ export class OrdersRepository {
                 },
               },
             }
-          : {}),
-      },
-    });
-
-    const orderDetails = await Promise.all(
-      params.cartItems.map(async (item) => {
-        const orderDetail = await this.prisma.orderDetail.create({
-          data: {
-            OrderID: order.OrderID,
-            FoodID: item.menuItem.id,
-            SubTotal: item.menuItem.price * item.quantity,
-            Quantity: item.quantity,
-          },
-        });
-        return orderDetail;
-      }),
-    );
-
-    if (params.paymentIntentId) {
-      await this.prisma.payment.create({
-        data: {
-          PaymentID: params.paymentIntentId,
-          OrderID: order.OrderID,
-          PaymentMethod: PAYMENT_METHOD.CreditCard,
-          TransactionID: params.paymentIntentId,
-          PaymentStatus: PAYMENT_STATUS.Completed,
-          TransactionData: {
-            payment_intent_id: params.paymentIntentId,
-            status: 'succeeded',
-            amount: Number(order.TotalAmount) * 100,
-            currency: 'usd',
-          },
+            : {}),
         },
       });
-    }
 
-    return { order, orderDetails };
+      const orderDetails = await Promise.all(
+        params.cartItems.map(async (item) => {
+          const orderDetail = await tx.orderDetail.create({
+            data: {
+              OrderID: order.OrderID,
+              FoodID: item.menuItem.id,
+              SubTotal: item.menuItem.price * item.quantity,
+              Quantity: item.quantity,
+            },
+          });
+          return orderDetail;
+        }),
+      );
+
+      if (params.paymentIntentId) {
+        await tx.payment.create({
+          data: {
+            PaymentID: params.paymentIntentId,
+            OrderID: order.OrderID,
+            PaymentMethod: PAYMENT_METHOD.CreditCard,
+            TransactionID: params.paymentIntentId,
+            PaymentStatus: PAYMENT_STATUS.Completed,
+            TransactionData: {
+              payment_intent_id: params.paymentIntentId,
+              status: 'succeeded',
+              amount: Number(order.TotalAmount) * 100,
+              currency: 'usd',
+            },
+          },
+        });
+      }
+
+      if (params.voucherId) {
+        await incrementVoucherUsedCountInTx(tx, params.voucherId);
+      }
+
+      return { order, orderDetails };
+    });
   }
 }
