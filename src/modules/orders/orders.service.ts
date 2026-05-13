@@ -16,6 +16,8 @@ import { CommissionSettlementService } from '@modules/payments/commission-settle
 import { DeliveryFeeService } from '@modules/shipping/delivery-fee.service';
 import { RabbitMqService } from '@infra/rabbitmq/rabbitmq.service';
 import crypto from 'crypto';
+import { VouchersService } from '@modules/vouchers/vouchers.service';
+import { computeVoucherDiscountFromRow } from '@common/utils/voucher-discount.util';
 
 type FoodWithImageURL = {
   ImageURL?: string | null;
@@ -48,6 +50,13 @@ export interface OrderDto {
   restaurantName: string;
   restaurantAvatarUrl?: string | null;
   items: OrderItemDto[];
+  /** Checkout snapshot or inferred breakdown for customer UI */
+  pricing?: {
+    subtotal: number;
+    deliveryFee: number;
+    voucherDiscount: number;
+  } | null;
+  voucherCode?: string | null;
   totalAmount: number;
   status: string;
   cancelReason?: string | null;
@@ -73,9 +82,102 @@ export interface OrdersListResponse {
   limit: number;
 }
 
+function readMetadataRecord(metadata: unknown): Record<string, unknown> {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata))
+    return {};
+  return metadata as Record<string, unknown>;
+}
+
+function numFromUnknown(v: unknown): number | undefined {
+  if (v == null) return undefined;
+  const n = typeof v === 'number' ? v : Number(v);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+type VoucherBreakdownRow = {
+  Code: string;
+  DiscountPercent: unknown;
+  DiscountAmount: unknown;
+  MinOrderValue: unknown;
+} | null;
+
+/** Prefer `Metadata.checkout`; else infer delivery + voucher from totals (best-effort for legacy rows). */
+function buildCustomerOrderPricing(params: {
+  metadata: unknown;
+  totalAmount: number;
+  orderDetails: Array<{ SubTotal: unknown }>;
+  voucher: VoucherBreakdownRow;
+}): {
+  pricing: OrderDto['pricing'];
+  voucherCode: string | null;
+} {
+  const meta = readMetadataRecord(params.metadata);
+  const checkoutRaw = meta['checkout'];
+  const voucherCode =
+    (typeof meta['voucherCode'] === 'string' && meta['voucherCode'].trim()) ||
+    params.voucher?.Code?.trim() ||
+    null;
+
+  if (
+    checkoutRaw &&
+    typeof checkoutRaw === 'object' &&
+    !Array.isArray(checkoutRaw)
+  ) {
+    const c = checkoutRaw as Record<string, unknown>;
+    const subtotal = numFromUnknown(c['subtotal']);
+    const deliveryFee = numFromUnknown(c['deliveryFee']);
+    const voucherDiscount = numFromUnknown(c['voucherDiscount']);
+    if (
+      subtotal != null &&
+      deliveryFee != null &&
+      voucherDiscount != null
+    ) {
+      return {
+        pricing: { subtotal, deliveryFee, voucherDiscount },
+        voucherCode,
+      };
+    }
+  }
+
+  const subtotal = params.orderDetails.reduce(
+    (s, d) => s + Number(d.SubTotal ?? 0),
+    0,
+  );
+  const total = params.totalAmount;
+  let voucherDiscount = 0;
+  if (params.voucher) {
+    voucherDiscount = computeVoucherDiscountFromRow({
+      subtotal,
+      discountPercent:
+        params.voucher.DiscountPercent == null
+          ? null
+          : Number(params.voucher.DiscountPercent),
+      discountAmount:
+        params.voucher.DiscountAmount == null
+          ? null
+          : Number(params.voucher.DiscountAmount),
+      minOrderValue:
+        params.voucher.MinOrderValue == null
+          ? null
+          : Number(params.voucher.MinOrderValue),
+    });
+  }
+  const deliveryFee =
+    Math.round((total - subtotal + voucherDiscount) * 100) / 100;
+  if (!Number.isFinite(deliveryFee) || deliveryFee < 0) {
+    return { pricing: null, voucherCode };
+  }
+  return {
+    pricing: { subtotal, deliveryFee, voucherDiscount },
+    voucherCode,
+  };
+}
+
 export interface OrderCartMenuItemDto {
   id: string;
   price: number;
+  /** Enterprise / restaurant id (sent by food-delivery-app checkout cart). */
+  restaurantId?: string | null;
 }
 
 export interface OrderCartItemDto {
@@ -105,7 +207,8 @@ export class OrdersService {
     private readonly commissionSettlement: CommissionSettlementService,
     private readonly deliveryFee: DeliveryFeeService,
     private readonly rabbit: RabbitMqService,
-  ) {}
+    private readonly vouchers: VouchersService,
+  ) { }
 
   async listForCustomer(
     accountId: string,
@@ -156,13 +259,20 @@ export class OrdersService {
       const latestPayment = order.payments?.[0];
       const meta =
         order.Metadata &&
-        typeof order.Metadata === 'object' &&
-        !Array.isArray(order.Metadata)
+          typeof order.Metadata === 'object' &&
+          !Array.isArray(order.Metadata)
           ? (order.Metadata as Record<string, unknown>)
           : {};
       const expiresAt = new Date(
         order.OrderDate.getTime() + 30 * 60 * 1000,
       ).toISOString();
+
+      const { pricing, voucherCode } = buildCustomerOrderPricing({
+        metadata: order.Metadata,
+        totalAmount: Number(order.TotalAmount),
+        orderDetails: order.orderDetails,
+        voucher: order.voucher ?? null,
+      });
 
       return {
         id: order.OrderID,
@@ -173,6 +283,8 @@ export class OrdersService {
         restaurantName,
         restaurantAvatarUrl,
         items,
+        pricing,
+        voucherCode,
         totalAmount: Number(order.TotalAmount),
         status: String(order.Status).toLowerCase(),
         cancelReason:
@@ -228,7 +340,7 @@ export class OrdersService {
       foodId: od.FoodID,
       foodName: od.food.DishName,
       quantity: od.Quantity,
-      price: Number(od.food.Price),
+      price: Number(od.SubTotal),
       imageUrl: getFoodImageUrl(od.food),
       specialInstructions: od.food.Description || undefined,
     }));
@@ -236,13 +348,20 @@ export class OrdersService {
     const latestPayment = order.payments?.[0];
     const meta =
       order.Metadata &&
-      typeof order.Metadata === 'object' &&
-      !Array.isArray(order.Metadata)
+        typeof order.Metadata === 'object' &&
+        !Array.isArray(order.Metadata)
         ? (order.Metadata as Record<string, unknown>)
         : {};
     const expiresAt = new Date(
       order.OrderDate.getTime() + 30 * 60 * 1000,
     ).toISOString();
+
+    const { pricing, voucherCode } = buildCustomerOrderPricing({
+      metadata: order.Metadata,
+      totalAmount: Number(order.TotalAmount),
+      orderDetails: order.orderDetails,
+      voucher: order.voucher ?? null,
+    });
 
     return {
       id: order.OrderID,
@@ -253,6 +372,8 @@ export class OrdersService {
       restaurantName,
       restaurantAvatarUrl,
       items,
+      pricing,
+      voucherCode,
       totalAmount: Number(order.TotalAmount),
       status: String(order.Status).toLowerCase(),
       cancelReason:
@@ -409,21 +530,39 @@ export class OrdersService {
       : null;
     const deliveryFee = enterpriseId
       ? (await this.deliveryFee.quoteForEnterprise({
-          enterpriseId,
-          deliveryInfo: {
-            address: deliveryInfo.address,
-            lat: deliveryInfo.lat,
-            lng: deliveryInfo.lng,
-          },
-        })).deliveryFee
+        enterpriseId,
+        deliveryInfo: {
+          address: deliveryInfo.address,
+          lat: deliveryInfo.lat,
+          lng: deliveryInfo.lng,
+        },
+      })).deliveryFee
       : 0;
-    const voucherDiscount = 0;
-    const total = subtotal + deliveryFee - voucherDiscount;
 
+    const cartRestaurantIds = cartItems.map((i) =>
+      (i.menuItem?.restaurantId ?? '').trim(),
+    );
+    const trimmedVoucher = (voucherCode ?? '').trim();
+
+    let voucherDiscount = 0;
     let voucherId: string | null = null;
-    if (voucherCode) {
-      voucherId = await this.repo.findValidVoucherId(voucherCode);
+
+    if (trimmedVoucher) {
+      const applied = await this.vouchers.findApplicableVoucherForOrder({
+        code: trimmedVoucher,
+        subtotal,
+        cartRestaurantIds,
+      });
+      if (!applied) {
+        throw new BadRequestException(
+          'Voucher is invalid, expired, not applicable to this cart, or has reached its usage limit.',
+        );
+      }
+      voucherDiscount = applied.discount;
+      voucherId = applied.voucherId;
     }
+
+    const total = Math.max(0, subtotal + deliveryFee - voucherDiscount);
 
     const { order } = await this.repo.createOrderWithDetailsAndPayment({
       customerId: customer.CustomerID,

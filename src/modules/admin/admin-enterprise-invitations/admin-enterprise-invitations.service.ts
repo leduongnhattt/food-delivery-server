@@ -155,6 +155,18 @@ function defaultInvitationTemplate(): InvitationTemplateValue {
 export class AdminEnterpriseInvitationsService {
   private readonly logger = new Logger(AdminEnterpriseInvitationsService.name);
 
+  /** Pending rows past `ExpiresAt` behave as Expired (until the expiry job persists the status). */
+  private effectiveInvitationStatus(
+    status: EnterpriseInvitationStatus,
+    expiresAt: Date,
+    at: Date = new Date(),
+  ): EnterpriseInvitationStatus {
+    if (status === EnterpriseInvitationStatus.Pending && expiresAt.getTime() <= at.getTime()) {
+      return EnterpriseInvitationStatus.Expired;
+    }
+    return status;
+  }
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly authRepo: AuthRepository,
@@ -311,9 +323,21 @@ export class AdminEnterpriseInvitationsService {
         ? statusRaw
         : 'all';
     const q = String(params.search || '').trim();
+    const now = new Date();
 
     const where: Prisma.EnterpriseInvitationWhereInput = {};
-    if (status !== 'all') {
+    if (status === 'pending') {
+      where.Status = EnterpriseInvitationStatus.Pending;
+      where.ExpiresAt = { gt: now };
+    } else if (status === 'expired') {
+      where.OR = [
+        { Status: EnterpriseInvitationStatus.Expired },
+        {
+          Status: EnterpriseInvitationStatus.Pending,
+          ExpiresAt: { lte: now },
+        },
+      ];
+    } else if (status !== 'all') {
       const normalized =
         (statusRaw.charAt(0).toUpperCase() + statusRaw.slice(1)) as EnterpriseInvitationStatus;
       where.Status = normalized;
@@ -357,6 +381,7 @@ export class AdminEnterpriseInvitationsService {
     return {
       items: items.map((row) => ({
         ...row,
+        Status: this.effectiveInvitationStatus(row.Status, row.ExpiresAt, now),
         hasActivationLinkClick: linkClickIds.has(row.InvitationID),
       })),
     };
@@ -365,10 +390,11 @@ export class AdminEnterpriseInvitationsService {
   async revokeInvitation(invitationId: string) {
     const row = await this.prisma.enterpriseInvitation.findUnique({
       where: { InvitationID: invitationId },
-      select: { InvitationID: true, Status: true },
+      select: { InvitationID: true, Status: true, ExpiresAt: true },
     });
     if (!row) throw new NotFoundException('Invitation not found');
-    if (row.Status !== 'Pending') {
+    const effective = this.effectiveInvitationStatus(row.Status, row.ExpiresAt);
+    if (effective !== EnterpriseInvitationStatus.Pending) {
       throw new BadRequestException('Only pending invitations can be revoked');
     }
     await this.prisma.enterpriseInvitation.update({
@@ -488,6 +514,8 @@ export class AdminEnterpriseInvitationsService {
       throw new NotFoundException('Invitation not found');
     }
 
+    const effectiveStatus = this.effectiveInvitationStatus(row.Status, row.ExpiresAt);
+
     const base = publicAppBaseUrl();
     const inviteLinkMasked = `${base}/enterprise/activate?token=•••••••••••••••••••••••••••••••••`;
 
@@ -530,21 +558,21 @@ export class AdminEnterpriseInvitationsService {
         by: 'Recipient',
       });
     }
-    if (row.Status === 'Accepted' && row.AcceptedAt) {
+    if (effectiveStatus === 'Accepted' && row.AcceptedAt) {
       timeline.push({
         title: 'Invitation accepted',
         at: row.AcceptedAt.toISOString(),
         by: 'Recipient',
       });
     }
-    if (row.Status === 'Revoked') {
+    if (effectiveStatus === 'Revoked') {
       timeline.push({
         title: 'Invitation revoked',
         at: (row.UpdatedAt ?? row.CreatedAt).toISOString(),
         by: 'Admin',
       });
     }
-    if (row.Status === 'Expired') {
+    if (effectiveStatus === 'Expired') {
       timeline.push({
         title: 'Invitation expired',
         at: row.ExpiresAt.toISOString(),
@@ -564,7 +592,7 @@ export class AdminEnterpriseInvitationsService {
         PhoneNumber: row.PhoneNumber,
         EnterpriseNameDraft: row.EnterpriseNameDraft,
         ExpiresAt: row.ExpiresAt,
-        Status: row.Status,
+        Status: effectiveStatus,
         AcceptedAt: row.AcceptedAt,
         CreatedAt: row.CreatedAt,
       },

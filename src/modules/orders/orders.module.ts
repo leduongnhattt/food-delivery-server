@@ -9,6 +9,7 @@ import { ShippingModule } from '@modules/shipping/shipping.module';
 import { ReturnsService } from '@modules/orders/returns/returns.service';
 import { CommissionSettlementModule } from '@modules/payments/commission-settlement/commission-settlement.module';
 import { RabbitMqModule } from '@infra/rabbitmq/rabbitmq.module';
+import { VouchersModule } from '@modules/vouchers/vouchers.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { RabbitMqModule } from '@infra/rabbitmq/rabbitmq.module';
     ShippingModule,
     CommissionSettlementModule,
     RabbitMqModule,
+    VouchersModule,
   ],
   providers: [OrdersService, OrdersRepository, ReturnsService],
   controllers: [OrdersController],
